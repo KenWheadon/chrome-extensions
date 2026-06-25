@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Auto-Clicker",
+  "version": "1.0",
+  "description": "Automatically clicks the 'Continue watching?' popup on YouTube.",
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
