@@ -1,10 +1,80 @@
 let isEnabled = false;
 
+// ─── Inject the frog toggle button into YouTube's player controls bar ───────
+
+function injectFrogButton() {
+  // Only inject once
+  if (document.getElementById('frog-toggle-btn')) return;
+
+  // YouTube's right-side controls panel inside the player
+  const rightControls =
+    document.querySelector('.ytp-right-controls') ||
+    document.querySelector('.ytp-chrome-controls');
+
+  if (!rightControls) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'frog-toggle-btn';
+  btn.title = 'Froggy Focus – toggle video block';
+  btn.textContent = '🐸';
+
+  Object.assign(btn.style, {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '20px',
+    lineHeight: '1',
+    padding: '0 6px',
+    verticalAlign: 'middle',
+    opacity: isEnabled ? '1' : '0.45',
+    transition: 'opacity 0.2s, transform 0.15s',
+    // Sit alongside native YouTube controls without breaking layout
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: '100%',
+    filter: isEnabled ? 'none' : 'grayscale(80%)',
+  });
+
+  btn.addEventListener('mouseenter', () => {
+    btn.style.transform = 'scale(1.2)';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.transform = 'scale(1)';
+  });
+
+  btn.addEventListener('click', () => {
+    const next = !isEnabled;
+    chrome.storage.local.set({ videoBlockEnabled: next });
+  });
+
+  // Insert as the first child so it appears on the far-left of right-controls
+  rightControls.insertBefore(btn, rightControls.firstChild);
+}
+
+function updateFrogButton() {
+  const btn = document.getElementById('frog-toggle-btn');
+  if (!btn) return;
+  btn.style.opacity = isEnabled ? '1' : '0.45';
+  btn.style.filter = isEnabled ? 'none' : 'grayscale(80%)';
+  btn.title = isEnabled
+    ? 'Froggy Focus – ON (click to disable)'
+    : 'Froggy Focus – OFF (click to enable)';
+}
+
+// ─── Frog overlay (covers the video when enabled) ────────────────────────────
+
 function updateVideos() {
-  // Target YouTube's player container — the most reliable positioning reference
-  const container = document.querySelector('div#player-container') ||
-                    document.querySelector('ytd-player#ytd-player');
+  // Use .html5-video-player — this is YouTube's actual stacking-context root.
+  // All YouTube UI layers (controls ~z51, popups ~z63+) live inside it, so
+  // our overlay z-index is relative to those layers rather than fighting them.
+  const container =
+    document.querySelector('.html5-video-player') ||
+    document.querySelector('div#player-container') ||
+    document.querySelector('ytd-player#ytd-player');
   const video = document.querySelector('video');
+
+  // Always try to inject the button into the controls bar
+  injectFrogButton();
 
   if (!container || !video) return;
 
@@ -18,7 +88,7 @@ function updateVideos() {
       overlay = document.createElement('div');
       overlay.className = 'frog-video-overlay';
 
-      // Background layer — covers the entire container
+      // Background layer
       const bg = document.createElement('div');
       Object.assign(bg.style, {
         position: 'absolute',
@@ -26,11 +96,12 @@ function updateVideos() {
         left: '0',
         width: '100%',
         height: '100%',
-        backgroundColor: '#1c1c1e'
+        backgroundColor: '#1c1c1e',
       });
 
-      // Centered content — pinned to exact center with transform
+      // Centred content
       const content = document.createElement('div');
+
       const frogEmoji = document.createElement('div');
       frogEmoji.textContent = '🐸';
       Object.assign(frogEmoji.style, {
@@ -38,16 +109,14 @@ function updateVideos() {
         marginBottom: '10px',
         filter: 'drop-shadow(0px 4px 8px rgba(0,0,0,0.3))',
         lineHeight: '1',
-        cursor: 'pointer'
+        cursor: 'pointer',
       });
+      frogEmoji.title = 'Click to play/pause';
       frogEmoji.addEventListener('click', () => {
         const vid = document.querySelector('video');
         if (!vid) return;
-        if (vid.paused) {
-          vid.play();
-        } else {
-          vid.pause();
-        }
+        if (vid.paused) vid.play();
+        else vid.pause();
       });
 
       const label = document.createElement('div');
@@ -59,85 +128,55 @@ function updateVideos() {
         fontWeight: 'bold',
         textTransform: 'lowercase',
         letterSpacing: '1px',
-        lineHeight: '1'
+        lineHeight: '1',
       });
-
-      // Kill button — skull + text pinned to the bottom
-      const killBtn = document.createElement('div');
-      killBtn.style.cursor = 'pointer';
-      killBtn.style.position = 'absolute';
-      killBtn.style.bottom = '24px';
-      killBtn.style.left = '50%';
-      killBtn.style.transform = 'translateX(-50%)';
-      killBtn.style.textAlign = 'center';
-      killBtn.style.opacity = '0.6';
-      killBtn.style.transition = 'opacity 0.2s';
-      killBtn.addEventListener('mouseenter', () => { killBtn.style.opacity = '1'; });
-      killBtn.addEventListener('mouseleave', () => { killBtn.style.opacity = '0.6'; });
-
-      const skullEmoji = document.createElement('div');
-      skullEmoji.textContent = '💀';
-      skullEmoji.style.fontSize = '28px';
-      skullEmoji.style.lineHeight = '1';
-      skullEmoji.style.marginBottom = '4px';
-
-      const killLabel = document.createElement('div');
-      killLabel.textContent = 'kill the frog';
-      killLabel.style.fontSize = '11px';
-      killLabel.style.fontFamily = 'sans-serif';
-      killLabel.style.color = '#999';
-      killLabel.style.letterSpacing = '0.5px';
-      killLabel.style.lineHeight = '1';
-
-      killBtn.appendChild(skullEmoji);
-      killBtn.appendChild(killLabel);
-
-      killBtn.addEventListener('click', () => {
-        chrome.storage.local.set({ videoBlockEnabled: false });
-      });
-
-      content.appendChild(frogEmoji);
-      content.appendChild(label);
-
 
       Object.assign(content.style, {
         position: 'absolute',
         top: '50%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
-        textAlign: 'center'
+        textAlign: 'center',
       });
+
+      content.appendChild(frogEmoji);
+      content.appendChild(label);
 
       Object.assign(overlay.style, {
         position: 'absolute',
         top: '0',
         left: '0',
         width: '100%',
-        height: '100%',
-        zIndex: '2147483647',
-        pointerEvents: 'auto'
+        // Leave the bottom ~48 px free so YouTube's native controls bar
+        // (which contains our injected 🐸 button) stays fully accessible.
+        height: 'calc(100% - 48px)',
+        // z-index 50: above the video element (~0) but below YouTube's
+        // controls bar (~51) and all popup panels (~63+), so settings /
+        // quality / caption menus render on top of our overlay.
+        zIndex: '50',
+        pointerEvents: 'auto',
       });
 
       overlay.appendChild(bg);
       overlay.appendChild(content);
-      overlay.appendChild(killBtn);
       container.appendChild(overlay);
     }
   } else {
-    // Restore video visibility and remove the frog
+    // Restore video visibility and remove the frog overlay
     video.style.opacity = '1';
     if (overlay) overlay.remove();
   }
+
+  updateFrogButton();
 }
 
+// ─── Initialise ──────────────────────────────────────────────────────────────
 
-// Check initial state on page load
 chrome.storage.local.get('videoBlockEnabled', (data) => {
   isEnabled = !!data.videoBlockEnabled;
   updateVideos();
 });
 
-// Watch for toggle updates from the popup menu
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.videoBlockEnabled) {
     isEnabled = changes.videoBlockEnabled.newValue;
@@ -145,5 +184,5 @@ chrome.storage.onChanged.addListener((changes) => {
   }
 });
 
-// Periodically check for dynamically loaded/changed video structures
+// Periodically re-check for dynamically loaded video/player structures
 setInterval(updateVideos, 1000);
