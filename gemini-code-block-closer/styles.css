@@ -1,0 +1,39 @@
+/* Styling matched to Google Material 3 / Gemini design system */
+.gemini-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 16px;
+  cursor: pointer;
+  margin-right: 8px;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+  user-select: none;
+}
+
+.gemini-collapse-toggle:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.gemini-collapse-toggle .collapse-icon {
+  transition: transform 0.2s ease;
+}
+
+/* When collapsed, rotate the icon to point sideways */
+.gemini-collapse-toggle.is-collapsed .collapse-icon {
+  transform: rotate(-90deg);
+}
+
+/* Ensure header stays visible, properly sized, and aligned when pre is hidden */
+.code-block-decoration {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  min-height: 40px; 
+}
