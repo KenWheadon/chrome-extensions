@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "HexVault - Color Keeper",
+  "version": "1.0",
+  "description": "Save custom colors and copy hex codes with one click.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "HexVault"
+  },
+  "permissions": [
+    "storage"
+  ]
+}

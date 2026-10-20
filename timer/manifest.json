@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Floating Screen Timer",
+  "version": "1.0",
+  "description": "Adds a simple stopwatch timer to the upper right corner of every page.",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>HexVault</h1>
+      <button id="clearAllBtn" title="Clear all saved colors" class="text-btn">Clear All</button>
+    </header>
+
+    <div class="input-card">
+      <div class="picker-wrapper">
+        <input type="color" id="colorPicker" value="#4F46E5">
+      </div>
+      <input type="text" id="hexInput" placeholder="#4F46E5" maxlength="7" spellcheck="false">
+      <button id="pasteBtn" title="Paste hex code from clipboard" class="secondary-btn">Paste</button>
+      <button id="saveBtn" class="primary-btn">Save</button>
+    </div>
+
+    <div id="toast" class="toast">Copied to clipboard!</div>
+
+    <div class="palette-header">
+      <span>Saved Colors (<span id="colorCount">0</span>)</span>
+    </div>
+
+    <div id="paletteList" class="palette-list">
+      <!-- Color rows will render here -->
+    </div>
+
+    <div id="emptyState" class="empty-state">
+      No colors saved yet. Pick or paste a hex code above.
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
