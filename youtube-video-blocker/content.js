@@ -67,20 +67,45 @@ function updateVideos() {
   // Use .html5-video-player — this is YouTube's actual stacking-context root.
   // All YouTube UI layers (controls ~z51, popups ~z63+) live inside it, so
   // our overlay z-index is relative to those layers rather than fighting them.
-  const container =
-    document.querySelector('.html5-video-player') ||
-    document.querySelector('div#player-container') ||
-    document.querySelector('ytd-player#ytd-player');
-  const video = document.querySelector('video');
-
   // Always try to inject the button into the controls bar
   injectFrogButton();
 
+  // When OFF: remove every overlay on the page (not just in the first player
+  // we find – YouTube can have several players, e.g. previews / miniplayer)
+  // and make sure no video is left hidden, so the controls are never blocked.
+  if (!isEnabled) {
+    document.querySelectorAll('.frog-video-overlay').forEach((o) => o.remove());
+    document.querySelectorAll('video').forEach((v) => { v.style.opacity = ''; });
+    updateFrogButton();
+    return;
+  }
+
+  const video = document.querySelector('.html5-video-player video') ||
+    document.querySelector('video');
+  const container =
+    (video && video.closest('.html5-video-player')) ||
+    document.querySelector('.html5-video-player') ||
+    document.querySelector('div#player-container') ||
+    document.querySelector('ytd-player#ytd-player');
+
   if (!container || !video) return;
+
+  // Drop any stray overlays that live in a different player than this one
+  document.querySelectorAll('.frog-video-overlay').forEach((o) => {
+    if (o.parentElement !== container) o.remove();
+  });
 
   let overlay = container.querySelector('.frog-video-overlay');
 
   if (isEnabled) {
+    // Keep the overlay clear of the real controls bar, whatever its size
+    // (it is taller in fullscreen).
+    if (overlay) {
+      const bar = container.querySelector('.ytp-chrome-bottom');
+      const h = Math.max(48, bar ? bar.offsetHeight : 0);
+      overlay.style.height = `calc(100% - ${h}px)`;
+    }
+
     // Hide the video visually but keep it playing audio
     video.style.opacity = '0';
 
@@ -172,14 +197,27 @@ function updateVideos() {
 
 // ─── Initialise ──────────────────────────────────────────────────────────────
 
+// Mirrors the toggle onto <html> so that:
+//  - content.css can hide the sidebar (class `frog-focus-on`)
+//  - quality.js (runs in the page's own JS world) can see the state
+//    through the `data-frog-lowq` attribute and force the lowest quality.
+function applyPageState() {
+  const root = document.documentElement;
+  root.classList.toggle('frog-focus-on', isEnabled);
+  if (isEnabled) root.setAttribute('data-frog-lowq', '1');
+  else root.removeAttribute('data-frog-lowq');
+}
+
 chrome.storage.local.get('videoBlockEnabled', (data) => {
   isEnabled = !!data.videoBlockEnabled;
+  applyPageState();
   updateVideos();
 });
 
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.videoBlockEnabled) {
-    isEnabled = changes.videoBlockEnabled.newValue;
+    isEnabled = !!changes.videoBlockEnabled.newValue;
+    applyPageState();
     updateVideos();
   }
 });

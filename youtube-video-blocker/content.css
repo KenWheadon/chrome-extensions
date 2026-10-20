@@ -1,0 +1,13 @@
+/* Froggy Focus – hides the entire YouTube watch-page sidebar when toggled on.
+   Covers related videos, playlist/up-next panel, live chat and ads in that column. */
+html.frog-focus-on ytd-watch-flexy #secondary,
+html.frog-focus-on #secondary.ytd-watch-flexy,
+html.frog-focus-on ytd-watch-next-secondary-results-renderer,
+html.frog-focus-on #related {
+  display: none !important;
+}
+
+/* Keep the player + description centred now that the right column is gone */
+html.frog-focus-on ytd-watch-flexy:not([theater]):not([fullscreen]) #columns {
+  justify-content: center;
+}
