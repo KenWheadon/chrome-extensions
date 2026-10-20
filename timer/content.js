@@ -1,54 +1,73 @@
-// Create the timer interface
+// Create the timer UI element
 const timerDiv = document.createElement('div');
-timerDiv.style.position = 'fixed';
-timerDiv.style.top = '15px';
-timerDiv.style.right = '15px';
-timerDiv.style.zIndex = '2147483647'; // Maximum z-index to stay on top
-timerDiv.style.padding = '8px 12px';
-timerDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.75)';
-timerDiv.style.color = '#fff';
-timerDiv.style.fontFamily = 'monospace';
-timerDiv.style.fontSize = '18px';
-timerDiv.style.borderRadius = '5px';
-timerDiv.style.cursor = 'pointer';
-timerDiv.style.userSelect = 'none';
-timerDiv.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-timerDiv.innerText = '00:00:00';
+Object.assign(timerDiv.style, {
+  position: 'fixed',
+  top: '15px',
+  right: '15px',
+  zIndex: '2147483647', // Maximum z-index to stay on top of everything
+  backgroundColor: 'rgba(0, 0, 0, 0.75)',
+  color: '#ffffff',
+  padding: '6px 12px',
+  borderRadius: '6px',
+  fontFamily: 'monospace, sans-serif',
+  fontSize: '16px',
+  fontWeight: 'bold',
+  cursor: 'pointer',
+  boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+  backdropFilter: 'blur(4px)'
+});
+timerDiv.title = "Click to reset timer";
 
-// Wait for the body to exist before appending
-window.onload = () => document.body.appendChild(timerDiv);
-
-let seconds = 0;
-let interval = null;
-let isRunning = false;
-
-function updateDisplay() {
-    const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
-    const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
-    const s = String(seconds % 60).padStart(2, '0');
-    timerDiv.innerText = `${h}:${m}:${s}`;
+// Wait for the body to be available, then attach the timer
+if (document.body) {
+  document.body.appendChild(timerDiv);
+} else {
+  document.addEventListener('DOMContentLoaded', () => document.body.appendChild(timerDiv));
 }
 
-// Click to start/pause
-timerDiv.addEventListener('click', () => {
-    if (isRunning) {
-        clearInterval(interval);
-        timerDiv.style.backgroundColor = 'rgba(200, 50, 50, 0.9)'; // Red when paused
-    } else {
-        interval = setInterval(() => {
-            seconds++;
-            updateDisplay();
-        }, 1000);
-        timerDiv.style.backgroundColor = 'rgba(50, 200, 50, 0.9)'; // Green when running
+// Function to format and update the time
+function updateDisplay(startTime) {
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+  const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+  const seconds = String(elapsed % 60).padStart(2, '0');
+  
+  // Only show hours if it's been running for more than an hour
+  if (hours !== "00") {
+    timerDiv.textContent = `${hours}:${minutes}:${seconds}`;
+  } else {
+    timerDiv.textContent = `${minutes}:${seconds}`;
+  }
+}
+
+// Initialize the timer
+function initTimer() {
+  chrome.storage.local.get(['timerStartTime'], (result) => {
+    let startTime = result.timerStartTime;
+    
+    // If no start time exists, set it to right now
+    if (!startTime) {
+      startTime = Date.now();
+      chrome.storage.local.set({ timerStartTime: startTime });
     }
-    isRunning = !isRunning;
+    
+    updateDisplay(startTime);
+    setInterval(() => updateDisplay(startTime), 1000);
+
+    // Listen for resets from other tabs to keep everything perfectly synced
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.timerStartTime) {
+        startTime = changes.timerStartTime.newValue;
+        updateDisplay(startTime);
+      }
+    });
+  });
+}
+
+// Allow resetting the timer by clicking on it
+timerDiv.addEventListener('click', () => {
+  const newStartTime = Date.now();
+  chrome.storage.local.set({ timerStartTime: newStartTime });
 });
 
-// Double click to reset
-timerDiv.addEventListener('dblclick', () => {
-    clearInterval(interval);
-    seconds = 0;
-    isRunning = false;
-    updateDisplay();
-    timerDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.75)'; // Black when reset
-});
+initTimer();

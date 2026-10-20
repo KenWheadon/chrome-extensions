@@ -1,8 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Floating Screen Timer",
+  "name": "Persistent Tab Timer",
   "version": "1.0",
-  "description": "Adds a simple stopwatch timer to the upper right corner of every page.",
+  "description": "Adds a persistent timer across all tabs.",
+  "permissions": [
+    "storage"
+  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
