@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Target Tasks</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body class="view-list">
+
+  <!-- ───────── Top bar ───────── -->
+  <header class="topbar">
+    <div class="brand">
+      <img src="icon48.png" alt="" class="brand-logo" id="brand-logo">
+      <span>Target Tasks</span>
+    </div>
+
+    <div class="view-switch" role="tablist" aria-label="View mode">
+      <button role="tab" data-view="list" title="Full list (L)">
+        <svg viewBox="0 0 16 16"><path d="M5 4h9M5 8h9M5 12h9"/><circle cx="2" cy="4" r=".6"/><circle cx="2" cy="8" r=".6"/><circle cx="2" cy="12" r=".6"/></svg>
+        <span>List</span>
+      </button>
+      <button role="tab" data-view="focus" title="Current task only (F)">
+        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/><path d="M8 0v3M8 13v3M0 8h3M13 8h3"/></svg>
+        <span>Focus</span>
+      </button>
+      <button role="tab" data-view="hidden" title="Hide everything (H)">
+        <svg viewBox="0 0 16 16"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/><path d="M2 14L14 2"/></svg>
+        <span>Hide</span>
+      </button>
+    </div>
+
+    <button id="pin-btn" class="icon-btn" title="Keep open in side panel" hidden>
+      <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M10 2.5v11"/></svg>
+    </button>
+  </header>
+
+  <!-- ───────── Player card ───────── -->
+  <section class="player" id="player">
+    <button class="char-wrap" id="char-btn" title="Change your buddy's colour" aria-label="Change character colour">
+      <div class="char" id="char-main"></div>
+    </button>
+
+    <div class="player-info">
+      <div class="lvl-row">
+        <span class="lvl-pill">LV <b id="level">1</b></span>
+        <span class="rank" id="rank">Rookie</span>
+        <span class="today" id="today" title="Tasks completed today"></span>
+      </div>
+      <div class="xpbar" id="xpbar" role="progressbar" aria-label="Experience">
+        <div class="xpfill" id="xp-fill"></div>
+        <div class="xpshine"></div>
+      </div>
+      <div class="xp-row">
+        <span id="xp-text">0 / 3 EXP</span>
+        <span id="xp-next" class="muted"></span>
+      </div>
+    </div>
+
+    <div id="xp-floats" class="xp-floats" aria-hidden="true"></div>
+  </section>
+
+  <!-- Colour picker -->
+  <div class="color-panel" id="color-panel" hidden>
+    <div class="color-title">Buddy colour</div>
+    <div class="swatches" id="swatches"></div>
+    <label class="custom-color">
+      <input type="color" id="custom-color">
+      <span>Custom</span>
+    </label>
+  </div>
+
+  <!-- ───────── Badges ───────── -->
+  <section class="badges" id="badges" aria-label="Daily badges"></section>
+
+  <!-- ───────── Focus view ───────── -->
+  <section class="focus-view" id="focus-view" aria-live="polite"></section>
+
+  <!-- ───────── List view ───────── -->
+  <section class="list-view" id="list-view">
+    <form id="add-form" class="add-form" autocomplete="off">
+      <input id="add-text" type="text" placeholder="Add a task…" aria-label="New task">
+      <label class="add-exp" title="EXP reward (defaults to 1)">
+        <input id="add-exp" type="number" min="1" max="99" placeholder="1" aria-label="EXP">
+        <span>EXP</span>
+      </label>
+      <button type="submit" class="btn primary add-btn" aria-label="Add task">
+        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
+      </button>
+    </form>
+
+    <div class="list-meta">
+      <span id="list-count"></span>
+      <button id="clear-done" class="link-btn">Clear completed</button>
+    </div>
+
+    <ul id="task-list" class="task-list"></ul>
+  </section>
+
+  <!-- ───────── Footer ───────── -->
+  <footer class="footer">
+    <input type="file" id="import-file" accept=".json" hidden>
+    <button id="import-btn" class="btn ghost">Import JSON</button>
+    <button id="export-btn" class="btn ghost">Export</button>
+    <button id="export-blank-btn" class="btn ghost" title="Blank format for LLMs">Blank format</button>
+  </footer>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span id="toast-msg"></span>
+    <button id="toast-action" class="toast-action" hidden></button>
+  </div>
+
+  <!-- Level-up overlay -->
+  <div class="levelup" id="levelup" hidden>
+    <div class="lu-rays"></div>
+    <div class="lu-confetti" id="lu-confetti"></div>
+    <div class="lu-card">
+      <div class="lu-char char" id="char-lu"></div>
+      <div class="lu-title">LEVEL UP!</div>
+      <div class="lu-level">Level <b id="lu-level">2</b></div>
+      <div class="lu-rank" id="lu-rank"></div>
+      <div class="lu-sub" id="lu-sub"></div>
+      <div class="lu-hint">click to continue</div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

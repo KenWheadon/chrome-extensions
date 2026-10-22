@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Target Tasks",
+  "version": "2.0",
+  "description": "A crosshair-targeted to-do list with EXP, levels, daily badges, a focus mode and a little buddy who cheers you on.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "storage",
+    "sidePanel"
+  ],
+  "action": {
+    "default_popup": "popup.html?ctx=popup",
+    "default_icon": {
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "popup.html?ctx=panel"
+  },
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
