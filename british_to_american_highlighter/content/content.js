@@ -1,9 +1,13 @@
 /**
  * British to American Spelling Highlighter
- * Content Script
+ * Content Script (Dynamic Content, MutationObserver, Shadow DOM, and Iframe Optimized)
  */
 
 (function () {
+  // Prevent duplicate execution in same execution context
+  if (window.__UK2US_INITIALIZED__) return;
+  window.__UK2US_INITIALIZED__ = true;
+
   let isEnabled = true;
   let showHud = true;
   let customDict = {};
@@ -11,28 +15,32 @@
   let highlights = [];
   let currentIndex = -1;
   let isProcessing = false;
-  let observer = null;
+  
+  // Set of observers (main document + any discovered open shadow roots)
+  const activeObservers = new Set();
+  const observedRoots = new WeakSet();
+  
+  // Is this execution context inside an iframe?
+  const inIframe = window !== window.top;
 
-  // Elements strictly to ignore
+  // Strict list of tags to ignore to avoid breaking code, inputs, media, or scripts
   const IGNORED_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT',
     'SELECT', 'OPTION', 'CODE', 'PRE', 'KBD', 'SVG',
-    'CANVAS', 'AUDIO', 'VIDEO', 'IFRAME', 'OBJECT'
+    'CANVAS', 'AUDIO', 'VIDEO', 'OBJECT', 'EMBED'
   ]);
 
-  // Preserve casing from British to American
+  // Casing preservation utility (e.g. Colour -> Color, COLOUR -> COLOR, colour -> color)
   function matchCase(original, replacement) {
     if (!original || !replacement) return replacement;
-    if (original === original.toUpperCase()) {
-      return replacement.toUpperCase();
-    }
+    if (original === original.toUpperCase()) return replacement.toUpperCase();
     if (original[0] === original[0].toUpperCase() && original.slice(1) === original.slice(1).toLowerCase()) {
       return replacement.charAt(0).toUpperCase() + replacement.slice(1).toLowerCase();
     }
     return replacement.toLowerCase();
   }
 
-  // Initialize extension state
+  // Load preferences from storage and start scanning
   function init() {
     chrome.storage.local.get(['uk2us_enabled', 'uk2us_custom_dict', 'uk2us_show_hud'], (data) => {
       isEnabled = data.uk2us_enabled !== false;
@@ -43,8 +51,7 @@
       activeDictionary = Object.assign({}, baseDict, customDict);
 
       if (isEnabled) {
-        runScanner();
-        setupObserver();
+        startScannerAndObservers();
       }
     });
   }
@@ -60,115 +67,158 @@
       )) {
         return true;
       }
+      // Never alter active user input in editable content (e.g. rich text editors)
       if (parent.isContentEditable) return true;
       parent = parent.parentElement;
     }
     return false;
   }
 
-  // Scan document text nodes and wrap British words in <mark>
-  function runScanner() {
-    if (!isEnabled || isProcessing) return;
-    if (!document.body) return;
-
-    isProcessing = true;
-    if (observer) observer.disconnect(); // prevent mutation event recursion
+  // Helper to discover all scannable roots (document body + open shadow roots + accessible iframes)
+  function collectScanRoots(root, list) {
+    if (!root) return;
+    list.push(root);
 
     try {
-      const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT,
-        {
-          acceptNode: function (node) {
-            if (!node.nodeValue || node.nodeValue.trim().length < 3) {
-              return NodeFilter.FILTER_SKIP;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+      let el;
+      while ((el = walker.nextNode())) {
+        // Handle open Shadow DOM (standard in D2L Brightspace web components)
+        if (el.shadowRoot && !observedRoots.has(el.shadowRoot)) {
+          observeRoot(el.shadowRoot);
+          collectScanRoots(el.shadowRoot, list);
+        }
+
+        // Handle dynamically injected same-origin / about:blank / srcdoc iframes
+        if (el.tagName === 'IFRAME') {
+          try {
+            if (el.contentDocument && el.contentDocument.body) {
+              if (!el.contentDocument.__uk2us_embedded_scanned__) {
+                el.contentDocument.__uk2us_embedded_scanned__ = true;
+                observeRoot(el.contentDocument.body);
+                collectScanRoots(el.contentDocument.body, list);
+              }
             }
-            if (shouldSkipNode(node)) {
-              return NodeFilter.FILTER_REJECT;
-            }
-            return NodeFilter.FILTER_ACCEPT;
+          } catch (e) {
+            // Cross-origin iframe; handled by Chrome's all_frames content script injection
           }
         }
-      );
-
-      const textNodes = [];
-      let currentNode;
-      while ((currentNode = walker.nextNode())) {
-        textNodes.push(currentNode);
       }
+    } catch (e) {
+      // Ignore security or traversal errors on detached nodes
+    }
+  }
+
+  // Core scanner: scans text nodes across all roots and wraps British spellings
+  function runScanner() {
+    if (!isEnabled || isProcessing) return;
+    const startRoot = document.body || document.documentElement;
+    if (!startRoot) return;
+
+    isProcessing = true;
+
+    // Flush any pending observer events before mutating DOM to avoid processing loops
+    activeObservers.forEach((obs) => obs.takeRecords());
+
+    try {
+      const roots = [];
+      collectScanRoots(startRoot, roots);
 
       const wordRegex = /\b[a-zA-Z]+(?:-[a-zA-Z]+)*\b/g;
 
-      textNodes.forEach((node) => {
-        const text = node.nodeValue;
-        if (!text) return;
-
-        let match;
-        wordRegex.lastIndex = 0;
-        let lastIdx = 0;
-        const frags = [];
-        let hasMatch = false;
-
-        while ((match = wordRegex.exec(text)) !== null) {
-          const word = match[0];
-          const lower = word.toLowerCase();
-
-          if (Object.prototype.hasOwnProperty.call(activeDictionary, lower)) {
-            hasMatch = true;
-            const matchStart = match.index;
-            if (matchStart > lastIdx) {
-              frags.push(document.createTextNode(text.substring(lastIdx, matchStart)));
+      roots.forEach((root) => {
+        const textNodes = [];
+        try {
+          const walker = document.createTreeWalker(
+            root,
+            NodeFilter.SHOW_TEXT,
+            {
+              acceptNode: function (node) {
+                if (!node.nodeValue || node.nodeValue.trim().length < 3) return NodeFilter.FILTER_SKIP;
+                if (shouldSkipNode(node)) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              }
             }
+          );
 
-            const usWord = matchCase(word, activeDictionary[lower]);
-
-            const mark = document.createElement('mark');
-            mark.className = 'uk2us-highlight';
-            mark.setAttribute('data-uk', word);
-            mark.setAttribute('data-us', usWord);
-            mark.setAttribute('title', `British: "${word}" ➔ American: "${usWord}" (Click to copy)`);
-            mark.textContent = word;
-
-            // Click to copy American replacement
-            mark.addEventListener('click', (e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              copyToClipboard(usWord);
-              showToast(`Copied "${usWord}" to clipboard!`);
-            });
-
-            frags.push(mark);
-            lastIdx = matchStart + word.length;
+          let currentNode;
+          while ((currentNode = walker.nextNode())) {
+            textNodes.push(currentNode);
           }
+        } catch (e) {
+          return;
         }
 
-        if (hasMatch) {
-          if (lastIdx < text.length) {
-            frags.push(document.createTextNode(text.substring(lastIdx)));
+        textNodes.forEach((node) => {
+          const text = node.nodeValue;
+          if (!text) return;
+
+          let match;
+          wordRegex.lastIndex = 0;
+          let lastIdx = 0;
+          const frags = [];
+          let hasMatch = false;
+
+          while ((match = wordRegex.exec(text)) !== null) {
+            const word = match[0];
+            const lower = word.toLowerCase();
+
+            if (Object.prototype.hasOwnProperty.call(activeDictionary, lower)) {
+              hasMatch = true;
+              const matchStart = match.index;
+              if (matchStart > lastIdx) {
+                frags.push(document.createTextNode(text.substring(lastIdx, matchStart)));
+              }
+
+              const usWord = matchCase(word, activeDictionary[lower]);
+
+              const mark = document.createElement('mark');
+              mark.className = 'uk2us-highlight';
+              mark.setAttribute('data-uk', word);
+              mark.setAttribute('data-us', usWord);
+              mark.setAttribute('title', `British: "${word}" ➔ American: "${usWord}" (Click to copy)`);
+              mark.textContent = word;
+
+              mark.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                copyToClipboard(usWord);
+                showToast(`Copied "${usWord}" to clipboard!`);
+              });
+
+              frags.push(mark);
+              lastIdx = matchStart + word.length;
+            }
           }
-          const parent = node.parentNode;
-          if (parent) {
-            const fragContainer = document.createDocumentFragment();
-            frags.forEach(f => fragContainer.appendChild(f));
-            parent.replaceChild(fragContainer, node);
+
+          if (hasMatch) {
+            if (lastIdx < text.length) {
+              frags.push(document.createTextNode(text.substring(lastIdx)));
+            }
+            const parent = node.parentNode;
+            if (parent) {
+              const fragContainer = document.createDocumentFragment();
+              frags.forEach((f) => fragContainer.appendChild(f));
+              parent.replaceChild(fragContainer, node);
+            }
           }
-        }
+        });
       });
 
+      // Update cached highlights list for navigation and count badges
       highlights = Array.from(document.querySelectorAll('mark.uk2us-highlight'));
       
       try {
         chrome.runtime.sendMessage({ type: 'UPDATE_COUNT', count: highlights.length }, () => {
-          if (chrome.runtime.lastError) { /* ignore connection check */ }
+          if (chrome.runtime.lastError) { /* ignore disconnected port */ }
         });
       } catch (e) {}
 
       updateHud();
     } finally {
+      // Discard all mutations created by our own insertions
+      activeObservers.forEach((obs) => obs.takeRecords());
       isProcessing = false;
-      if (isEnabled) {
-        setupObserver();
-      }
     }
   }
 
@@ -212,6 +262,11 @@
       if (existing) existing.remove();
       return;
     }
+    
+    // Suppress HUD in tiny iframes to avoid blocking interface elements
+    if (inIframe && (window.innerWidth < 320 || window.innerHeight < 220)) {
+      return;
+    }
 
     let hud = document.getElementById('uk2us-hud');
     if (!hud) {
@@ -225,9 +280,9 @@
 
     hud.innerHTML = `
       <div class="uk2us-hud-header">
-        <span class="uk2us-hud-title">🇬🇧 ➔ 🇺🇸 <strong>${currentDisplay}</strong> British word${highlights.length === 1 ? '' : 's'}</span>
+        <span class="uk2us-hud-title">🇬🇧 ➔ 🇺🇸 <strong>${currentDisplay}</strong></span>
         <div class="uk2us-hud-actions">
-          <button id="uk2us-hud-copy-all" title="Copy list of all American replacements" class="uk2us-hud-btn">📋 Copy</button>
+          <button id="uk2us-hud-copy-all" title="Copy list of all American replacements" class="uk2us-hud-btn">📋</button>
           <button id="uk2us-hud-prev" title="Previous word" class="uk2us-hud-btn">▲</button>
           <button id="uk2us-hud-next" title="Next word" class="uk2us-hud-btn">▼</button>
           <button id="uk2us-hud-close" title="Dismiss HUD" class="uk2us-hud-btn">✕</button>
@@ -246,7 +301,6 @@
     });
   }
 
-  // Navigate through highlights
   function navigate(direction) {
     highlights = Array.from(document.querySelectorAll('mark.uk2us-highlight'));
     if (highlights.length === 0) return;
@@ -266,7 +320,6 @@
     updateHud();
   }
 
-  // Copy all unique replacements found on page
   function copyAllReplacements() {
     if (highlights.length === 0) return;
 
@@ -287,48 +340,108 @@
     showToast(`Copied ${Object.keys(counts).length} replacements to clipboard!`);
   }
 
-  // MutationObserver for dynamic websites
-  let debounceTimer;
-  function setupObserver() {
-    if (observer) observer.disconnect();
-    observer = new MutationObserver((mutations) => {
+  // MutationObserver with Debounce & Event Filtering
+  let debounceTimer = null;
+  function scheduleScan(delay = 350) {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      runScanner();
+    }, delay);
+  }
+
+  function observeRoot(root) {
+    if (!root || observedRoots.has(root)) return;
+    observedRoots.add(root);
+
+    const observer = new MutationObserver((mutations) => {
       if (isProcessing) return;
-      let shouldScan = false;
-      for (const m of mutations) {
-        if (m.target && m.target.nodeType === Node.ELEMENT_NODE) {
-          const el = m.target;
-          if (el.classList && (
-            el.classList.contains('uk2us-hud') ||
-            el.classList.contains('uk2us-toast') ||
-            el.classList.contains('uk2us-highlight')
-          )) {
-            continue;
+
+      let shouldTrigger = false;
+
+      for (let i = 0; i < mutations.length; i++) {
+        const m = mutations[i];
+
+        // 1. Text node value modified in-place (characterData)
+        if (m.type === 'characterData') {
+          const parent = m.target ? m.target.parentElement : null;
+          if (!parent || !parent.classList || !parent.classList.contains('uk2us-highlight')) {
+            shouldTrigger = true;
+            break;
           }
         }
-        if (m.addedNodes.length > 0) {
-          shouldScan = true;
-          break;
+
+        // 2. Nodes added to DOM (childList)
+        if (m.type === 'childList') {
+          for (let j = 0; j < m.addedNodes.length; j++) {
+            const added = m.addedNodes[j];
+            if (added.nodeType === Node.ELEMENT_NODE) {
+              if (added.classList && (
+                added.classList.contains('uk2us-hud') ||
+                added.classList.contains('uk2us-toast') ||
+                added.classList.contains('uk2us-highlight')
+              )) {
+                continue;
+              }
+              // If an element with a shadowRoot was injected, observe it immediately
+              if (added.shadowRoot) {
+                observeRoot(added.shadowRoot);
+              }
+              shouldTrigger = true;
+              break;
+            } else if (added.nodeType === Node.TEXT_NODE) {
+              const p = added.parentElement;
+              if (!p || !p.classList || !p.classList.contains('uk2us-highlight')) {
+                shouldTrigger = true;
+                break;
+              }
+            }
+          }
+          if (shouldTrigger) break;
         }
       }
 
-      if (shouldScan) {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          runScanner();
-        }, 600);
+      if (shouldTrigger) {
+        scheduleScan(350);
       }
     });
 
-    if (document.body) {
-      observer.observe(document.body, { childList: true, subtree: true });
-    }
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
+    activeObservers.add(observer);
   }
 
-  // Cleanly restore DOM on toggle off
+  function startScannerAndObservers() {
+    const root = document.body || document.documentElement;
+    if (root) {
+      observeRoot(root);
+    }
+    runScanner();
+
+    // Hook into SPA Navigation (pushState / replaceState / popstate)
+    window.addEventListener('popstate', () => scheduleScan(300));
+    window.addEventListener('hashchange', () => scheduleScan(300));
+
+    // Fallback polling for asynchronous SPA frameworks that swap views without firing standard events
+    setInterval(() => {
+      if (!isEnabled || isProcessing) return;
+      // Fast check: if scannable unhighlighted text or new shadow roots exist
+      const unhighlightedSample = document.querySelector('p, div, span, h1, h2, h3, li, td');
+      if (unhighlightedSample && highlights.length === 0) {
+        runScanner();
+      }
+    }, 2500);
+  }
+
   function removeHighlights() {
-    if (observer) observer.disconnect();
+    activeObservers.forEach((obs) => obs.disconnect());
+    activeObservers.clear();
+
     highlights = Array.from(document.querySelectorAll('mark.uk2us-highlight'));
-    highlights.forEach(mark => {
+    highlights.forEach((mark) => {
       const parent = mark.parentNode;
       if (parent) {
         const textNode = document.createTextNode(mark.textContent);
@@ -340,6 +453,7 @@
     currentIndex = -1;
     const hud = document.getElementById('uk2us-hud');
     if (hud) hud.remove();
+
     try {
       chrome.runtime.sendMessage({ type: 'UPDATE_COUNT', count: 0 }, () => {
         if (chrome.runtime.lastError) { /* ignore */ }
@@ -347,7 +461,6 @@
     } catch (e) {}
   }
 
-  // Communication with extension popup
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'GET_PAGE_DATA') {
       highlights = Array.from(document.querySelectorAll('mark.uk2us-highlight'));
@@ -366,7 +479,8 @@
       sendResponse({
         isEnabled,
         totalCount: highlights.length,
-        words: Object.values(freq)
+        words: Object.values(freq),
+        inIframe: inIframe
       });
       return true;
     }
@@ -375,7 +489,7 @@
       isEnabled = request.enabled;
       chrome.storage.local.set({ uk2us_enabled: isEnabled });
       if (isEnabled) {
-        runScanner();
+        startScannerAndObservers();
       } else {
         removeHighlights();
       }

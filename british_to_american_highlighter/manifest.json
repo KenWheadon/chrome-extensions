@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "British to American Spelling Highlighter",
-  "version": "1.0.0",
+  "name": "British to American Spelling Highlighter (iframe support)",
+  "version": "1.0.1",
   "description": "Highlights British English spellings on any web page with instant American English replacements.",
   "permissions": [
     "storage",
+    "scripting",
     "activeTab"
   ],
   "action": {
@@ -21,9 +22,10 @@
   "content_scripts": [
     {
       "matches": [
-        "http://*/*",
-        "https://*/*"
+        "<all_urls>"
       ],
+      "all_frames": true,
+      "match_about_blank": true,
       "js": [
         "content/dict.js",
         "content/content.js"
