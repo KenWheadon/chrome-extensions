@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Collect highlights across all frames and shadow roots
     chrome.scripting.executeScript({
       target: { tabId: tabId, allFrames: true },
       func: () => {
@@ -33,13 +32,20 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!root) return;
           try {
             const found = root.querySelectorAll('mark.uk2us-highlight');
-            found.forEach(m => marks.push(m));
+            found.forEach((m) => marks.push(m));
             const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
             let el;
             while ((el = walker.nextNode())) {
               if (el.shadowRoot) collect(el.shadowRoot);
+              if (el.tagName === 'IFRAME') {
+                try {
+                  if (el.contentDocument && el.contentDocument.body) {
+                    collect(el.contentDocument.body);
+                  }
+                } catch (e) { }
+              }
             }
-          } catch (e) {}
+          } catch (e) { }
         }
         collect(document.body || document.documentElement);
 
@@ -58,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
         wordListEl.innerHTML = '<div class="empty-state">Reload this page once to activate highlighter.</div>';
         return;
       }
-      
+
       results.forEach(res => {
         if (res.result) {
           totalHighlights += res.result.count;
@@ -72,9 +78,9 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       });
-      
+
       totalCountEl.textContent = totalHighlights;
-      
+
       const finalWords = Object.values(aggregatedWords);
       if (finalWords.length === 0) {
         wordListEl.innerHTML = '<div class="empty-state">No British spellings detected on this page.</div>';
@@ -133,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
           customUsInput.value = '';
           addCustomBtn.textContent = '✓ Added';
           setTimeout(() => addCustomBtn.textContent = 'Add', 1500);
-          
+
           chrome.tabs.sendMessage(tabId, { action: 'TOGGLE_ENABLED', enabled: true });
         });
       });

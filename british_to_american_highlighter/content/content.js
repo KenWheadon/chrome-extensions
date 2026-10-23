@@ -1,10 +1,9 @@
 /**
  * British to American Spelling Highlighter
- * Content Script (Dynamic Content, MutationObserver, Shadow DOM, and Iframe Optimized)
+ * Content Script (D2L Editor, Nested Shadow DOM & Iframe Compatible)
  */
 
 (function () {
-  // Prevent duplicate execution in same execution context
   if (window.__UK2US_INITIALIZED__) return;
   window.__UK2US_INITIALIZED__ = true;
 
@@ -15,22 +14,43 @@
   let highlights = [];
   let currentIndex = -1;
   let isProcessing = false;
-  
-  // Set of observers (main document + any discovered open shadow roots)
+
   const activeObservers = new Set();
   const observedRoots = new WeakSet();
-  
-  // Is this execution context inside an iframe?
+  const styledDocuments = new WeakSet();
   const inIframe = window !== window.top;
 
-  // Strict list of tags to ignore to avoid breaking code, inputs, media, or scripts
+  // Strict list of tags to ignore. NOTE: contenteditable is now allowed!
   const IGNORED_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT',
     'SELECT', 'OPTION', 'CODE', 'PRE', 'KBD', 'SVG',
     'CANVAS', 'AUDIO', 'VIDEO', 'OBJECT', 'EMBED'
   ]);
 
-  // Casing preservation utility (e.g. Colour -> Color, COLOUR -> COLOR, colour -> color)
+  const HIGHLIGHT_CSS = `
+    mark.uk2us-highlight {
+      background-color: #fef08a !important;
+      color: #1e293b !important;
+      border-bottom: 2px solid #f59e0b !important;
+      border-radius: 3px !important;
+      padding: 1px 3px !important;
+      margin: 0 1px !important;
+      font-weight: 500 !important;
+      cursor: pointer !important;
+      display: inline !important;
+      text-decoration: none !important;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+    }
+    mark.uk2us-highlight:hover {
+      background-color: #fde047 !important;
+      border-bottom-color: #d97706 !important;
+    }
+    mark.uk2us-highlight.uk2us-active-focus {
+      background-color: #fed7aa !important;
+      outline: 2px solid #ea580c !important;
+    }
+  `;
+
   function matchCase(original, replacement) {
     if (!original || !replacement) return replacement;
     if (original === original.toUpperCase()) return replacement.toUpperCase();
@@ -40,13 +60,12 @@
     return replacement.toLowerCase();
   }
 
-  // Load preferences from storage and start scanning
   function init() {
     chrome.storage.local.get(['uk2us_enabled', 'uk2us_custom_dict', 'uk2us_show_hud'], (data) => {
       isEnabled = data.uk2us_enabled !== false;
       showHud = data.uk2us_show_hud !== false;
       customDict = data.uk2us_custom_dict || {};
-      
+
       const baseDict = typeof UK_TO_US_DICT !== 'undefined' ? UK_TO_US_DICT : {};
       activeDictionary = Object.assign({}, baseDict, customDict);
 
@@ -54,6 +73,16 @@
         startScannerAndObservers();
       }
     });
+  }
+
+  function ensureStylesInDocument(doc) {
+    if (!doc || styledDocuments.has(doc)) return;
+    styledDocuments.add(doc);
+    try {
+      const style = doc.createElement('style');
+      style.textContent = HIGHLIGHT_CSS;
+      (doc.head || doc.body || doc.documentElement).appendChild(style);
+    } catch (e) { }
   }
 
   function shouldSkipNode(node) {
@@ -67,14 +96,21 @@
       )) {
         return true;
       }
-      // Never alter active user input in editable content (e.g. rich text editors)
-      if (parent.isContentEditable) return true;
       parent = parent.parentElement;
     }
     return false;
   }
 
-  // Helper to discover all scannable roots (document body + open shadow roots + accessible iframes)
+  function isNodeInEditable(node) {
+    let p = node.parentElement;
+    while (p) {
+      if (p.isContentEditable) return true;
+      p = p.parentElement;
+    }
+    return false;
+  }
+
+  // Recursively inspect light DOM, shadow DOM, and embedded D2L / TinyMCE iframes
   function collectScanRoots(root, list) {
     if (!root) return;
     list.push(root);
@@ -83,41 +119,35 @@
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
       let el;
       while ((el = walker.nextNode())) {
-        // Handle open Shadow DOM (standard in D2L Brightspace web components)
+        // Traverse D2L custom web component shadow roots
         if (el.shadowRoot && !observedRoots.has(el.shadowRoot)) {
           observeRoot(el.shadowRoot);
           collectScanRoots(el.shadowRoot, list);
         }
 
-        // Handle dynamically injected same-origin / about:blank / srcdoc iframes
+        // Traverse D2L / TinyMCE editor iframes
         if (el.tagName === 'IFRAME') {
           try {
             if (el.contentDocument && el.contentDocument.body) {
-              if (!el.contentDocument.__uk2us_embedded_scanned__) {
-                el.contentDocument.__uk2us_embedded_scanned__ = true;
+              ensureStylesInDocument(el.contentDocument);
+              if (!el.contentDocument.__uk2us_scanned__) {
+                el.contentDocument.__uk2us_scanned__ = true;
                 observeRoot(el.contentDocument.body);
                 collectScanRoots(el.contentDocument.body, list);
               }
             }
-          } catch (e) {
-            // Cross-origin iframe; handled by Chrome's all_frames content script injection
-          }
+          } catch (e) { }
         }
       }
-    } catch (e) {
-      // Ignore security or traversal errors on detached nodes
-    }
+    } catch (e) { }
   }
 
-  // Core scanner: scans text nodes across all roots and wraps British spellings
   function runScanner() {
     if (!isEnabled || isProcessing) return;
     const startRoot = document.body || document.documentElement;
     if (!startRoot) return;
 
     isProcessing = true;
-
-    // Flush any pending observer events before mutating DOM to avoid processing loops
     activeObservers.forEach((obs) => obs.takeRecords());
 
     try {
@@ -171,19 +201,40 @@
               }
 
               const usWord = matchCase(word, activeDictionary[lower]);
+              const inEditor = isNodeInEditable(node);
 
               const mark = document.createElement('mark');
               mark.className = 'uk2us-highlight';
               mark.setAttribute('data-uk', word);
               mark.setAttribute('data-us', usWord);
-              mark.setAttribute('title', `British: "${word}" ➔ American: "${usWord}" (Click to copy)`);
+              mark.setAttribute(
+                'title',
+                inEditor
+                  ? `British: "${word}" ➔ Click to replace with "${usWord}"`
+                  : `British: "${word}" ➔ American: "${usWord}" (Click to copy)`
+              );
               mark.textContent = word;
 
+              // Click handler: Replaces directly in D2L editor or copies to clipboard
               mark.addEventListener('click', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
                 copyToClipboard(usWord);
-                showToast(`Copied "${usWord}" to clipboard!`);
+
+                if (isNodeInEditable(mark)) {
+                  const replacementTextNode = document.createTextNode(usWord);
+                  const parent = mark.parentNode;
+                  if (parent) {
+                    parent.replaceChild(replacementTextNode, mark);
+                    parent.normalize();
+                    // Dispatch input event so D2L editor registers the modification
+                    parent.dispatchEvent(new Event('input', { bubbles: true }));
+                    parent.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  showToast(`Replaced with "${usWord}"!`);
+                } else {
+                  showToast(`Copied "${usWord}" to clipboard!`);
+                }
               });
 
               frags.push(mark);
@@ -205,24 +256,21 @@
         });
       });
 
-      // Update cached highlights list for navigation and count badges
       highlights = Array.from(document.querySelectorAll('mark.uk2us-highlight'));
-      
+
       try {
         chrome.runtime.sendMessage({ type: 'UPDATE_COUNT', count: highlights.length }, () => {
-          if (chrome.runtime.lastError) { /* ignore disconnected port */ }
+          if (chrome.runtime.lastError) { }
         });
-      } catch (e) {}
+      } catch (e) { }
 
       updateHud();
     } finally {
-      // Discard all mutations created by our own insertions
       activeObservers.forEach((obs) => obs.takeRecords());
       isProcessing = false;
     }
   }
 
-  // Clipboard copy helper
   function copyToClipboard(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text);
@@ -238,7 +286,6 @@
     }
   }
 
-  // Floating Toast Notification
   function showToast(message) {
     let toast = document.getElementById('uk2us-toast');
     if (!toast) {
@@ -255,15 +302,13 @@
     }, 2000);
   }
 
-  // Floating Navigation HUD widget (bottom-right)
   function updateHud() {
     if (!showHud || highlights.length === 0) {
       const existing = document.getElementById('uk2us-hud');
       if (existing) existing.remove();
       return;
     }
-    
-    // Suppress HUD in tiny iframes to avoid blocking interface elements
+
     if (inIframe && (window.innerWidth < 320 || window.innerHeight < 220)) {
       return;
     }
@@ -340,9 +385,8 @@
     showToast(`Copied ${Object.keys(counts).length} replacements to clipboard!`);
   }
 
-  // MutationObserver with Debounce & Event Filtering
   let debounceTimer = null;
-  function scheduleScan(delay = 350) {
+  function scheduleScan(delay = 400) {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       runScanner();
@@ -361,7 +405,6 @@
       for (let i = 0; i < mutations.length; i++) {
         const m = mutations[i];
 
-        // 1. Text node value modified in-place (characterData)
         if (m.type === 'characterData') {
           const parent = m.target ? m.target.parentElement : null;
           if (!parent || !parent.classList || !parent.classList.contains('uk2us-highlight')) {
@@ -370,7 +413,6 @@
           }
         }
 
-        // 2. Nodes added to DOM (childList)
         if (m.type === 'childList') {
           for (let j = 0; j < m.addedNodes.length; j++) {
             const added = m.addedNodes[j];
@@ -382,7 +424,6 @@
               )) {
                 continue;
               }
-              // If an element with a shadowRoot was injected, observe it immediately
               if (added.shadowRoot) {
                 observeRoot(added.shadowRoot);
               }
@@ -401,7 +442,7 @@
       }
 
       if (shouldTrigger) {
-        scheduleScan(350);
+        scheduleScan(400);
       }
     });
 
@@ -421,16 +462,14 @@
     }
     runScanner();
 
-    // Hook into SPA Navigation (pushState / replaceState / popstate)
     window.addEventListener('popstate', () => scheduleScan(300));
     window.addEventListener('hashchange', () => scheduleScan(300));
 
-    // Fallback polling for asynchronous SPA frameworks that swap views without firing standard events
+    // Watch for dynamically appearing D2L editors
     setInterval(() => {
       if (!isEnabled || isProcessing) return;
-      // Fast check: if scannable unhighlighted text or new shadow roots exist
-      const unhighlightedSample = document.querySelector('p, div, span, h1, h2, h3, li, td');
-      if (unhighlightedSample && highlights.length === 0) {
+      const editor = document.querySelector('d2l-activity-text-editor, d2l-htmleditor, [contenteditable="true"]');
+      if (editor) {
         runScanner();
       }
     }, 2500);
@@ -456,9 +495,9 @@
 
     try {
       chrome.runtime.sendMessage({ type: 'UPDATE_COUNT', count: 0 }, () => {
-        if (chrome.runtime.lastError) { /* ignore */ }
+        if (chrome.runtime.lastError) { }
       });
-    } catch (e) {}
+    } catch (e) { }
   }
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
