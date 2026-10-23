@@ -1,0 +1,110 @@
+/* British to American English Highlighter Styles */
+
+mark.uk2us-highlight {
+  background-color: #fef08a !important;
+  color: #1e293b !important;
+  border-bottom: 2px solid #f59e0b !important;
+  border-radius: 3px !important;
+  padding: 1px 3px !important;
+  margin: 0 1px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  display: inline !important;
+  text-decoration: none !important;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+mark.uk2us-highlight:hover {
+  background-color: #fde047 !important;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5) !important;
+}
+
+mark.uk2us-highlight.uk2us-active-focus {
+  background-color: #fed7aa !important;
+  outline: 3px solid #ea580c !important;
+  outline-offset: 2px !important;
+  animation: uk2us-pulse 1.2s infinite alternate !important;
+}
+
+@keyframes uk2us-pulse {
+  from { outline-color: #ea580c; }
+  to { outline-color: #fb923c; }
+}
+
+/* Floating Navigation HUD */
+.uk2us-hud {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  z-index: 2147483647 !important;
+  background: rgba(15, 23, 42, 0.94) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  color: #f8fafc !important;
+  padding: 8px 12px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 13px !important;
+  user-select: none !important;
+}
+
+.uk2us-hud-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.uk2us-hud-title {
+  color: #e2e8f0 !important;
+}
+
+.uk2us-hud-title strong {
+  color: #fef08a !important;
+}
+
+.uk2us-hud-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.uk2us-hud-btn {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 5px !important;
+  padding: 3px 6px !important;
+  font-size: 11px !important;
+  cursor: pointer !important;
+}
+
+.uk2us-hud-btn:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Floating Toast Notification */
+.uk2us-toast {
+  position: fixed !important;
+  bottom: 74px !important;
+  right: 24px !important;
+  z-index: 2147483647 !important;
+  background: #0f172a !important;
+  color: #38bdf8 !important;
+  border: 1px solid #0284c7 !important;
+  padding: 8px 14px !important;
+  border-radius: 8px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  opacity: 0 !important;
+  transform: translateY(8px) !important;
+  transition: opacity 0.2s ease, transform 0.2s ease !important;
+  pointer-events: none !important;
+}
+
+.uk2us-toast.uk2us-toast-show {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+}

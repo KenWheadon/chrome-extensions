@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>US Spell Check</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <span class="flag">🇬🇧 ➔ 🇺🇸</span>
+      <h2>US Spell Check</h2>
+    </div>
+    <label class="switch" title="Toggle highlighting on/off">
+      <input type="checkbox" id="toggle-enabled" checked>
+      <span class="slider round"></span>
+    </label>
+  </div>
+
+  <div class="status-card">
+    <div class="stat-number" id="total-count">0</div>
+    <div class="stat-label">British spellings found</div>
+  </div>
+
+  <div class="action-row">
+    <button id="copy-summary-btn" class="btn btn-secondary">📋 Copy All Replacements</button>
+  </div>
+
+  <div class="list-section">
+    <h3>Words on this page</h3>
+    <div id="word-list" class="word-list">
+      <div class="empty-state">Scanning page...</div>
+    </div>
+  </div>
+
+  <div class="custom-rule-section">
+    <details>
+      <summary>+ Add Custom Word Rule</summary>
+      <div class="custom-inputs">
+        <input type="text" id="custom-uk" placeholder="British (e.g. maths)">
+        <input type="text" id="custom-us" placeholder="American (e.g. math)">
+        <button id="add-custom-btn" class="btn btn-primary">Add</button>
+      </div>
+    </details>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
