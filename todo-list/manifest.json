@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Target Tasks",
-  "version": "2.0",
-  "description": "A crosshair-targeted to-do list with EXP, levels, daily badges, a focus mode and a little buddy who cheers you on.",
+  "version": "2.1",
+  "description": "A crosshair-targeted to-do list with EXP, levels, daily badges, a clean focus mode, backlog, and a little buddy who cheers you on.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",

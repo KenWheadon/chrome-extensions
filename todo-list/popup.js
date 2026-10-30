@@ -1,10 +1,8 @@
-/* Target Tasks v2 — EXP, levels, badges, focus mode & a little buddy */
+/* Target Tasks v2.1 — EXP, levels, badges, focused single-task mode, backlog & a little buddy */
 'use strict';
 
 /* ───────────────────────── Config ───────────────────────── */
 
-// EXP needed to go from level L to L+1.
-// Starts at 3 and climbs linearly, then plateaus at 20 EXP per level from level 30 on.
 const PLATEAU_LEVEL = 30;
 const PLATEAU_EXP = 20;
 const START_EXP = 3;
@@ -44,7 +42,7 @@ const DEFAULT_STATE = {
     daily: {},          // { 'YYYY-MM-DD': completedCount }
     badges: {},         // { badgeId: { count, last: 'YYYY-MM-DD' } }
     charColor: '#e74c3c',
-    view: 'list',       // 'list' | 'focus' | 'hidden'
+    view: 'list',       // 'list' | 'focus'
 };
 const STORAGE_KEY = 'targetTasksState';
 
@@ -62,7 +60,6 @@ const store = {
             try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (_) { }
         }
         if (!saved) {
-            // Migrate tasks from v1 (localStorage 'targetTasks')
             saved = { ...DEFAULT_STATE };
             try {
                 const old = JSON.parse(localStorage.getItem('targetTasks'));
@@ -103,6 +100,7 @@ function normalizeTasks(list) {
                 exp: t.exp != null ? clampExp(t.exp) : null,   // null = default (1)
                 awarded: Number(t.awarded) || 0,
                 completedOn: t.completedOn || null,
+                backlog: !!t.backlog,
             };
         });
 }
@@ -172,7 +170,7 @@ const CHAR_SVG = `
 /* ───────────────────────── State ───────────────────────── */
 
 let state = { ...DEFAULT_STATE };
-let undoStack = null;          // { tasks } snapshot for undo
+let undoStack = null;
 let toastTimer = null;
 let dragId = null;
 
@@ -232,124 +230,173 @@ function renderBadges(newId) {
 }
 
 const ICON_TRASH = '<svg viewBox="0 0 16 16"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.8v4.4M9.2 6.8v4.4"/></svg>';
-const ICON_TARGET = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/><path d="M8 0v3M8 13v3M0 8h3M13 8h3"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg>';
-const ICON_SKIP = '<svg viewBox="0 0 16 16"><path d="M3 3l6 5-6 5zM12 3v10"/></svg>';
+const ICON_TOP = '<svg viewBox="0 0 16 16"><path d="M8 13.5V4M4 7.5l4-4 4 4M2.5 2.5h11"/></svg>';
+const ICON_TO_BACKLOG = '<svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v2.5h-11zM3.5 6v6.5a1 1 0 001 1h7a1 1 0 001-1V6M6 8.5h4"/></svg>';
+const ICON_FROM_BACKLOG = '<svg viewBox="0 0 16 16"><path d="M2.5 6h11M3.5 6v6.5a1 1 0 001 1h7a1 1 0 001-1V6M8 9.5V2.5M5 5.5L8 2.5l3 3"/></svg>';
 
-function currentTask() { return state.tasks.find(t => !t.completed); }
+function currentTask() {
+    return state.tasks.find(t => !t.completed && !t.backlog);
+}
+
+function createTaskItem(task, isBacklog, cur) {
+    const li = document.createElement('li');
+    li.className = 'task-item' + (task.completed ? ' completed' : '') + (cur && cur.id === task.id ? ' current' : '') + (isBacklog ? ' is-backlog' : '');
+    li.dataset.id = task.id;
+
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.textContent = '⋮⋮';
+    handle.title = 'Drag to reorder';
+    handle.addEventListener('mousedown', () => { li.draggable = true; });
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'check';
+    cb.checked = task.completed;
+    cb.setAttribute('aria-label', 'Complete task');
+    cb.addEventListener('change', () => toggleTask(task.id, cb.checked, li));
+
+    const text = document.createElement('span');
+    text.className = 't-text';
+    text.textContent = task.text;
+    text.title = 'Double-click to edit';
+    text.addEventListener('dblclick', () => startEditText(task, text));
+
+    const chip = document.createElement('button');
+    chip.className = 'exp-chip' + (task.exp ? '' : ' default');
+    chip.textContent = `+${taskExp(task)} EXP`;
+    chip.title = task.completed ? `Earned ${task.awarded || taskExp(task)} EXP` : 'Click to set EXP reward';
+    chip.disabled = task.completed;
+    chip.addEventListener('click', () => startEditExp(task, chip));
+
+    // Action buttons group
+    const actions = document.createElement('div');
+    actions.className = 'task-actions';
+
+    // 1. Send to top button
+    const topBtn = document.createElement('button');
+    topBtn.className = 'task-btn top-btn';
+    topBtn.innerHTML = ICON_TOP;
+    topBtn.title = isBacklog ? 'Move out of backlog to top of list' : 'Send to top';
+    topBtn.setAttribute('aria-label', 'Send to top');
+    topBtn.addEventListener('click', () => sendToTop(task.id));
+    actions.appendChild(topBtn);
+
+    // 2. Backlog toggle button
+    const backlogBtn = document.createElement('button');
+    backlogBtn.className = 'task-btn backlog-btn';
+    backlogBtn.innerHTML = isBacklog ? ICON_FROM_BACKLOG : ICON_TO_BACKLOG;
+    backlogBtn.title = isBacklog ? 'Move to active list' : 'Send to backlog';
+    backlogBtn.setAttribute('aria-label', isBacklog ? 'Move to active list' : 'Send to backlog');
+    backlogBtn.addEventListener('click', () => toggleBacklog(task.id));
+    actions.appendChild(backlogBtn);
+
+    // 3. Delete button
+    const del = document.createElement('button');
+    del.className = 'task-btn del-btn';
+    del.innerHTML = ICON_TRASH;
+    del.title = 'Delete task';
+    del.setAttribute('aria-label', 'Delete task');
+    del.addEventListener('click', () => deleteTask(task.id, li));
+    actions.appendChild(del);
+
+    li.append(handle, cb, text, chip, actions);
+
+    // Drag & drop
+    li.addEventListener('dragstart', e => {
+        dragId = task.id;
+        li.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', task.id);
+    });
+    li.addEventListener('dragend', () => {
+        li.draggable = false;
+        li.classList.remove('dragging');
+        document.querySelectorAll('.drop-before,.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+    });
+    li.addEventListener('dragover', e => {
+        if (!dragId || dragId === task.id) return;
+        e.preventDefault();
+        const r = li.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        li.classList.toggle('drop-after', after);
+        li.classList.toggle('drop-before', !after);
+    });
+    li.addEventListener('dragleave', () => li.classList.remove('drop-before', 'drop-after'));
+    li.addEventListener('drop', e => {
+        e.preventDefault();
+        const after = li.classList.contains('drop-after');
+        li.classList.remove('drop-before', 'drop-after');
+        if (dragId && dragId !== task.id) moveTask(dragId, task.id, after);
+        dragId = null;
+    });
+
+    return li;
+}
 
 function renderList() {
     const ul = $('task-list');
+    const backlogUl = $('backlog-list');
     ul.innerHTML = '';
-    const left = state.tasks.filter(t => !t.completed).length;
-    const done = state.tasks.length - left;
-    $('list-count').textContent = state.tasks.length ? `${left} to go · ${done} done` : '';
-    $('clear-done').hidden = done === 0;
+    backlogUl.innerHTML = '';
 
-    if (!state.tasks.length) {
-        ul.innerHTML = `<li class="empty"><b>No targets yet</b>Add one above, or import a JSON list.</li>`;
-        return;
-    }
+    const activeTasks = state.tasks.filter(t => !t.backlog);
+    const backlogTasks = state.tasks.filter(t => t.backlog);
+
+    const left = activeTasks.filter(t => !t.completed).length;
+    const done = activeTasks.filter(t => t.completed).length;
+    $('list-count').textContent = activeTasks.length ? `${left} to go · ${done} done` : '';
+    
+    const totalDone = state.tasks.filter(t => t.completed).length;
+    $('clear-done').hidden = totalDone === 0;
+
     const cur = currentTask();
 
-    state.tasks.forEach(task => {
-        const li = document.createElement('li');
-        li.className = 'task-item' + (task.completed ? ' completed' : '') + (cur && cur.id === task.id ? ' current' : '');
-        li.dataset.id = task.id;
-
-        const handle = document.createElement('span');
-        handle.className = 'drag-handle';
-        handle.textContent = '⋮⋮';
-        handle.title = 'Drag to reorder';
-        handle.addEventListener('mousedown', () => { li.draggable = true; });
-
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.className = 'check';
-        cb.checked = task.completed;
-        cb.setAttribute('aria-label', 'Complete task');
-        cb.addEventListener('change', () => toggleTask(task.id, cb.checked, li));
-
-        const text = document.createElement('span');
-        text.className = 't-text';
-        text.textContent = task.text;
-        text.title = 'Double-click to edit';
-        text.addEventListener('dblclick', () => startEditText(task, text));
-
-        const chip = document.createElement('button');
-        chip.className = 'exp-chip' + (task.exp ? '' : ' default');
-        chip.textContent = `+${taskExp(task)} EXP`;
-        chip.title = task.completed ? `Earned ${task.awarded || taskExp(task)} EXP` : 'Click to set EXP reward';
-        chip.disabled = task.completed;
-        chip.addEventListener('click', () => startEditExp(task, chip));
-
-        const del = document.createElement('button');
-        del.className = 'del-btn';
-        del.innerHTML = ICON_TRASH;
-        del.title = 'Delete task';
-        del.setAttribute('aria-label', 'Delete task');
-        del.addEventListener('click', () => deleteTask(task.id, li));
-
-        li.append(handle, cb, text, chip, del);
-
-        // drag & drop (handle-initiated)
-        li.addEventListener('dragstart', e => {
-            dragId = task.id;
-            li.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', task.id);
+    // Render active tasks
+    if (!activeTasks.length) {
+        ul.innerHTML = `<li class="empty"><b>No active targets</b>Add one above, or send an item from your backlog.</li>`;
+    } else {
+        activeTasks.forEach(task => {
+            ul.appendChild(createTaskItem(task, false, cur));
         });
-        li.addEventListener('dragend', () => {
-            li.draggable = false;
-            li.classList.remove('dragging');
-            document.querySelectorAll('.drop-before,.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
-        });
-        li.addEventListener('dragover', e => {
-            if (!dragId || dragId === task.id) return;
-            e.preventDefault();
-            const r = li.getBoundingClientRect();
-            const after = e.clientY > r.top + r.height / 2;
-            li.classList.toggle('drop-after', after);
-            li.classList.toggle('drop-before', !after);
-        });
-        li.addEventListener('dragleave', () => li.classList.remove('drop-before', 'drop-after'));
-        li.addEventListener('drop', e => {
-            e.preventDefault();
-            const after = li.classList.contains('drop-after');
-            li.classList.remove('drop-before', 'drop-after');
-            if (dragId && dragId !== task.id) moveTask(dragId, task.id, after);
-            dragId = null;
-        });
+    }
 
-        ul.appendChild(li);
-    });
+    // Render backlog
+    $('backlog-count').textContent = backlogTasks.length;
+    if (!backlogTasks.length) {
+        backlogUl.innerHTML = `<li class="backlog-empty">Backlog is empty. Move items here to save them for later.</li>`;
+    } else {
+        backlogTasks.forEach(task => {
+            backlogUl.appendChild(createTaskItem(task, true, cur));
+        });
+    }
 }
 
 function renderFocus() {
     const wrap = $('focus-view');
     const cur = currentTask();
-    const remaining = state.tasks.filter(t => !t.completed).length;
 
-    if (!state.tasks.length) {
-        wrap.innerHTML = `<div class="focus-card"><div class="focus-empty"><div class="big">🎯</div><b>Nothing targeted</b>Add some tasks to get started.<br><br><button class="btn primary" data-act="show-list">Open list</button></div></div>`;
-    } else if (!cur) {
-        wrap.innerHTML = `<div class="focus-card"><div class="focus-empty"><div class="big">🏆</div><b>All targets cleared!</b>Nice work — that's everything on the list.<br><br><button class="btn ghost" data-act="show-list">Show list</button></div></div>`;
-    } else {
+    if (!cur) {
         wrap.innerHTML = `
+          <div class="focus-card">
+            <div class="focus-empty">
+              <div class="big">🎯</div>
+              <b>No active targets</b>
+              Switch to the List tab to choose or add tasks.
+            </div>
+          </div>`;
+        return;
+    }
+
+    wrap.innerHTML = `
       <div class="focus-card" id="focus-card">
-        <div class="focus-label">${ICON_TARGET} Current target <span class="exp-chip ${cur.exp ? '' : 'default'}" style="margin-left:auto">+${taskExp(cur)} EXP</span></div>
         <div class="focus-text"></div>
         <div class="focus-actions">
           <button class="btn primary" data-act="complete">${ICON_CHECK} Complete</button>
-          ${remaining > 1 ? `<button class="btn ghost" data-act="skip" title="Move to the end of the list">${ICON_SKIP} Later</button>` : ''}
-        </div>
-        <div class="focus-foot">
-          <span>${remaining - 1 ? `${remaining - 1} more in the queue` : 'Last one!'}</span>
-          <button class="link-btn" data-act="show-list">Show full list</button>
         </div>
       </div>`;
-        wrap.querySelector('.focus-text').textContent = cur.text;
-    }
+    wrap.querySelector('.focus-text').textContent = cur.text;
 }
 
 function render() {
@@ -366,7 +413,6 @@ function render() {
 
 function setView(v) {
     state.view = v;
-    if (v === 'hidden') $('color-panel').hidden = true;
     render();
     commit();
 }
@@ -374,7 +420,54 @@ function setView(v) {
 function addTask(text, exp) {
     text = text.trim();
     if (!text) return;
-    state.tasks.push({ id: uid(), text, completed: false, exp: exp ? clampExp(exp) : null, awarded: 0, completedOn: null });
+    const newTask = {
+        id: uid(),
+        text,
+        completed: false,
+        exp: exp ? clampExp(exp) : null,
+        awarded: 0,
+        completedOn: null,
+        backlog: false,
+    };
+    // Insert before the first backlog task so active items stay together
+    const firstBacklogIdx = state.tasks.findIndex(t => t.backlog);
+    if (firstBacklogIdx === -1) {
+        state.tasks.push(newTask);
+    } else {
+        state.tasks.splice(firstBacklogIdx, 0, newTask);
+    }
+    render();
+    commit();
+}
+
+function sendToTop(id) {
+    const idx = state.tasks.findIndex(t => t.id === id);
+    if (idx < 0) return;
+    const [task] = state.tasks.splice(idx, 1);
+    task.backlog = false;
+    state.tasks.unshift(task);
+    render();
+    commit();
+}
+
+function toggleBacklog(id) {
+    const idx = state.tasks.findIndex(t => t.id === id);
+    if (idx < 0) return;
+    const [task] = state.tasks.splice(idx, 1);
+    if (task.backlog) {
+        // Un-backlog: move to end of active list
+        task.backlog = false;
+        const lastActiveIdx = state.tasks.map(t => !t.backlog).lastIndexOf(true);
+        if (lastActiveIdx === -1) {
+            state.tasks.unshift(task);
+        } else {
+            state.tasks.splice(lastActiveIdx + 1, 0, task);
+        }
+    } else {
+        // Send to backlog: move to end of backlog
+        task.backlog = true;
+        state.tasks.push(task);
+    }
     render();
     commit();
 }
@@ -392,7 +485,6 @@ function toggleTask(id, done, li) {
         state.totalExp += task.awarded;
         state.daily[today] = (state.daily[today] || 0) + 1;
     } else {
-        // un-checking takes the EXP back, so there's no farming
         task.completed = false;
         state.totalExp = Math.max(0, state.totalExp - (task.awarded || 0));
         if (task.completedOn === today) state.daily[today] = Math.max(0, (state.daily[today] || 0) - 1);
@@ -400,7 +492,6 @@ function toggleTask(id, done, li) {
         task.completedOn = null;
     }
 
-    // prune old daily counts (keep ~60 days)
     const keys = Object.keys(state.daily).sort();
     while (keys.length > 60) delete state.daily[keys.shift()];
 
@@ -428,7 +519,7 @@ function checkBadges() {
         const rec = state.badges[b.id];
         if (n >= b.n && (!rec || rec.last !== today)) {
             state.badges[b.id] = { count: (rec ? rec.count : 0) + 1, last: today };
-            earned = b;   // highest one wins the toast
+            earned = b;
         }
     });
     return earned;
@@ -469,22 +560,15 @@ function moveTask(fromId, toId, after) {
     const [item] = state.tasks.splice(from, 1);
     let to = state.tasks.findIndex(t => t.id === toId);
     if (to < 0) to = state.tasks.length;
+    
+    // Adopts the backlog status of the dropped item's context
+    const target = state.tasks[to];
+    if (target) {
+        item.backlog = target.backlog;
+    }
     state.tasks.splice(to + (after ? 1 : 0), 0, item);
     render();
     commit();
-}
-
-function skipTask() {
-    const cur = currentTask();
-    if (!cur) return;
-    const card = $('focus-card');
-    const go = () => {
-        state.tasks = state.tasks.filter(t => t.id !== cur.id);
-        state.tasks.push(cur);
-        render();
-        commit();
-    };
-    if (card) { card.classList.add('leaving'); setTimeout(go, 280); } else go();
 }
 
 function completeCurrent() {
@@ -556,6 +640,7 @@ function floatExp(n) {
 
 function bounce() {
     const c = $('char-main');
+    if (!c) return;
     c.classList.remove('hop'); void c.offsetWidth; c.classList.add('hop');
     setTimeout(() => c.classList.remove('hop'), 600);
 }
@@ -571,7 +656,6 @@ function showLevelUp(level) {
     if (acc !== prevAcc) sub = acc === 'star' ? '⭐ Unlocked: star antenna!' : '👑 Unlocked: the crown!';
     $('lu-sub').textContent = sub;
 
-    // confetti
     const conf = $('lu-confetti');
     conf.innerHTML = '';
     const colors = [state.charColor, '#f5b82e', '#ffffff', '#ff8a4c', '#3498db', '#2eaf6b'];
@@ -588,14 +672,15 @@ function showLevelUp(level) {
 
     ov.hidden = false;
     const luChar = $('char-lu');
-    [luChar, $('char-main')].forEach(c => { c.classList.remove('dance'); void c.offsetWidth; c.classList.add('dance'); });
+    [luChar, $('char-main')].forEach(c => { if (c) { c.classList.remove('dance'); void c.offsetWidth; c.classList.add('dance'); } });
     clearTimeout(luTimer);
     luTimer = setTimeout(hideLevelUp, 3800);
 }
 function hideLevelUp() {
     $('levelup').hidden = true;
     $('char-lu').classList.remove('dance');
-    setTimeout(() => $('char-main').classList.remove('dance'), 200);
+    const m = $('char-main');
+    if (m) setTimeout(() => m.classList.remove('dance'), 200);
 }
 
 function toast(msg, actionLabel, action) {
@@ -632,7 +717,6 @@ function importFile(file) {
         const tasks = normalizeTasks(data);
         if (!tasks.length) return toast('⚠️ No tasks with a "text" field found.');
         undoStack = JSON.parse(JSON.stringify(state.tasks));
-        // already-completed imported tasks don't grant EXP
         tasks.forEach(t => { if (t.completed) { t.awarded = 0; t.completedOn = null; } });
         state.tasks = tasks;
         render();
@@ -654,8 +738,6 @@ function wire() {
         const act = e.target.closest('[data-act]');
         if (!act) return;
         if (act.dataset.act === 'complete') completeCurrent();
-        if (act.dataset.act === 'skip') skipTask();
-        if (act.dataset.act === 'show-list') setView('list');
     });
 
     $('add-form').addEventListener('submit', e => {
@@ -682,7 +764,6 @@ function wire() {
     $('custom-color').addEventListener('input', e => { state.charColor = e.target.value; applyCharColor(); });
     $('custom-color').addEventListener('change', () => { bounce(); commit(); });
     $('char-btn').addEventListener('click', () => {
-        if (state.view === 'hidden') { bounce(); return; }
         $('color-panel').hidden = !$('color-panel').hidden;
         bounce();
     });
@@ -695,25 +776,30 @@ function wire() {
         e.target.value = '';
     });
     $('export-btn').addEventListener('click', () => {
-        download(`target-tasks-${todayKey()}.json`, state.tasks.map(({ id, text, completed, exp }) => ({ id, text, completed, exp: exp || 1 })));
+        download(`target-tasks-${todayKey()}.json`, state.tasks.map(({ id, text, completed, exp, backlog }) => ({
+            id,
+            text,
+            completed,
+            exp: exp || 1,
+            backlog: !!backlog,
+        })));
     });
     $('export-blank-btn').addEventListener('click', () => {
         download('blank_llm_format.json', [
-            { id: 1, text: 'Task instruction goes here', completed: false, exp: 1 },
-            { id: 2, text: 'A bigger task worth more EXP (exp is optional, defaults to 1)', completed: false, exp: 5 },
+            { id: 1, text: 'Task instruction goes here', completed: false, exp: 1, backlog: false },
+            { id: 2, text: 'A task saved in the backlog for later', completed: false, exp: 2, backlog: true },
         ]);
     });
 
     // level-up overlay
     $('levelup').addEventListener('click', hideLevelUp);
 
-    // keyboard shortcuts (when not typing)
+    // keyboard shortcuts
     document.addEventListener('keydown', e => {
         if (e.target.matches('input, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
         const k = e.key.toLowerCase();
         if (k === 'l') setView('list');
         else if (k === 'f') setView('focus');
-        else if (k === 'h') setView('hidden');
         else if (k === 'escape' && !$('levelup').hidden) hideLevelUp();
         else if (k === 'n' && state.view === 'list') { e.preventDefault(); $('add-text').focus(); }
     });
@@ -739,7 +825,6 @@ function detectContext() {
     const ctx = new URLSearchParams(location.search).get('ctx');
     if (ctx === 'popup') document.documentElement.classList.add('is-popup');
 
-    // "Keep open" button → Chrome side panel, so the current task stays on screen
     const pin = $('pin-btn');
     if (ctx === 'popup' && typeof chrome !== 'undefined' && chrome.sidePanel && chrome.windows) {
         let winId = null;
@@ -760,8 +845,7 @@ function detectContext() {
     wire();
     state = await store.load();
     state.tasks = normalizeTasks(state.tasks);
-    if (!['list', 'focus', 'hidden'].includes(state.view)) state.view = 'list';
-    // first run after upgrade: persist migrated data
+    if (!['list', 'focus'].includes(state.view)) state.view = 'list';
     commit();
     render();
 })();

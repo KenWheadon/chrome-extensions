@@ -24,10 +24,6 @@
         <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/><path d="M8 0v3M8 13v3M0 8h3M13 8h3"/></svg>
         <span>Focus</span>
       </button>
-      <button role="tab" data-view="hidden" title="Hide everything (H)">
-        <svg viewBox="0 0 16 16"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/><path d="M2 14L14 2"/></svg>
-        <span>Hide</span>
-      </button>
     </div>
 
     <button id="pin-btn" class="icon-btn" title="Keep open in side panel" hidden>
@@ -95,6 +91,18 @@
     </div>
 
     <ul id="task-list" class="task-list"></ul>
+
+    <!-- Backlog section -->
+    <div class="backlog-section" id="backlog-section">
+      <div class="backlog-header">
+        <div class="backlog-title">
+          <svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v2.5h-11zM3.5 6v6.5a1 1 0 001 1h7a1 1 0 001-1V6M6 8.5h4"/></svg>
+          <span>Backlog</span>
+          <span class="backlog-badge" id="backlog-count">0</span>
+        </div>
+      </div>
+      <ul id="backlog-list" class="task-list backlog-list"></ul>
+    </div>
   </section>
 
   <!-- ───────── Footer ───────── -->
