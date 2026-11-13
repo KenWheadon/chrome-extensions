@@ -1,0 +1,49 @@
+{
+  "_instructions_for_llm": [
+    "This is a task list. When given this file plus an update (notes, a message, a meeting summary, etc.), return the COMPLETE updated JSON in the same structure.",
+    "Keep every existing task unless the update says to remove it. Never change a task's id.",
+    "New tasks get the next id in sequence (T-001, T-002, ...). Set created to today's date.",
+    "When a task's status changes, update updated and add a short entry to its history.",
+    "Set completed to the date a task moved to 'done'; leave it null otherwise.",
+    "Allowed status values: todo, in_progress, blocked, done, cancelled.",
+    "Allowed priority values: high, medium, low.",
+    "If something in the update is unclear, do not guess: add it to open_questions instead.",
+    "Update meta.last_updated and write a one-paragraph meta.summary of what changed.",
+    "Dates use YYYY-MM-DD. Output valid JSON only, with no commentary before or after it."
+  ],
+
+  "meta": {
+    "list_name": "My Task List",
+    "owner": "",
+    "last_updated": "YYYY-MM-DD",
+    "summary": "What changed in the most recent update."
+  },
+
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Short, action-first description of the task",
+      "details": "Any extra context, links or acceptance criteria.",
+      "status": "todo",
+      "priority": "medium",
+      "assignee": "",
+      "category": "",
+      "due": null,
+      "created": "YYYY-MM-DD",
+      "updated": "YYYY-MM-DD",
+      "completed": null,
+      "depends_on": [],
+      "subtasks": [
+        { "title": "First step", "done": false }
+      ],
+      "notes": "",
+      "history": [
+        { "date": "YYYY-MM-DD", "change": "Task created" }
+      ]
+    }
+  ],
+
+  "open_questions": [
+    { "question": "Anything the LLM couldn't resolve from the update", "related_task": "T-001" }
+  ]
+}
