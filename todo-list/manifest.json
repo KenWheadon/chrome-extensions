@@ -1,25 +1,30 @@
 {
   "manifest_version": 3,
-  "name": "Target Tasks",
-  "version": "2.1",
-  "description": "A crosshair-targeted to-do list with EXP, levels, daily badges, a clean focus mode, backlog, and a little buddy who cheers you on.",
-  "minimum_chrome_version": "116",
-  "permissions": [
-    "storage",
-    "sidePanel"
-  ],
+  "name": "VaporPet Tasks",
+  "short_name": "VaporPet",
+  "version": "1.0.0",
+  "description": "A vaporwave task manager with a mutating virtual pet. Every finished task is 1 EXP.",
   "action": {
-    "default_popup": "popup.html?ctx=popup",
+    "default_popup": "popup.html",
+    "default_title": "VaporPet Tasks",
     "default_icon": {
-      "48": "icon48.png",
-      "128": "icon128.png"
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
-  "side_panel": {
-    "default_path": "popup.html?ctx=panel"
-  },
   "icons": {
-    "48": "icon48.png",
-    "128": "icon128.png"
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["storage", "unlimitedStorage", "clipboardWrite"],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Alt+Shift+V" },
+      "description": "Open VaporPet"
+    }
   }
 }
