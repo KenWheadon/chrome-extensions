@@ -322,6 +322,7 @@
     freshIds.clear();
     const foot = $('#listFoot');
     foot.innerHTML = tab === 'done' && items.length ? '<button class="btn danger" id="clearDone">CLEAR DONE</button>' : '';
+    renderPlanner();
   }
 
   function startEdit(li) {
@@ -451,6 +452,32 @@
     inp.focus();
   });
 
+  /* ---------- planner view ---------- */
+  function renderPlanner() {
+    const active = byList('active');
+    const inner = $('#plannerInner');
+    if (!inner) return;
+
+    // Minimum 8-hour day layout starting at 9 AM, expanding if there are more tasks
+    const totalBlocks = Math.max(8, active.length + 1); 
+    let html = '';
+
+    for (let i = 0; i < totalBlocks; i++) {
+      const hour = (9 + i) % 24;
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+      const t = active[i];
+      
+      html += `<div class="plan-block" style="animation-delay: ${i * 0.04}s">
+        <div class="plan-time">${displayHour} ${ampm}</div>
+        <div class="plan-task ${t ? '' : 'empty'}">
+          ${t ? `<div class="ttitle">${esc(t.title)}</div>` : 'Open slot'}
+        </div>
+      </div>`;
+    }
+    inner.innerHTML = html;
+  }
+
   /* ---------- focus view ---------- */
   function renderFocus() {
     const t = byList('active')[0];
@@ -476,6 +503,7 @@
     state.ui.mode = mode;
     document.body.classList.toggle('mode-list', mode === 'list');
     document.body.classList.toggle('mode-focus', mode === 'focus');
+    document.body.classList.toggle('mode-planner', mode === 'planner');
     $$('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
     save();
     renderAll();
@@ -486,6 +514,7 @@
     renderPet();
     renderTasks();
     renderFocus();
+    renderPlanner();
     renderAddControls();
   }
 

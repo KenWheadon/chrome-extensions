@@ -191,7 +191,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 
 /* ---------- list view ---------- */
 main { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-body.mode-list #focusView, body.mode-focus #listView { display: none; }
+body:not(.mode-list) #listView,
+body:not(.mode-focus) #focusView,
+body:not(.mode-planner) #plannerView { display: none; }
 
 #addForm { display: flex; gap: 5px; padding: 8px 10px 6px; }
 #addInput {
@@ -570,3 +572,42 @@ body.mode-focus #petPanel, body.mode-focus .top { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; transition: none !important; }
 }
+/* ---------- planner view ---------- */
+#plannerView {
+  padding: 12px 10px;
+  overflow-y: auto;
+  flex: 1; min-height: 0;
+}
+#plannerView::-webkit-scrollbar { width: 6px; }
+#plannerView::-webkit-scrollbar-thumb { background: #01cdfe55; border-radius: 3px; }
+
+#plannerInner { display: flex; flex-direction: column; gap: 8px; }
+.plan-block {
+  display: flex; gap: 10px; align-items: stretch;
+  animation: taskIn .35s cubic-bezier(.2, 1.3, .4, 1) both;
+}
+.plan-time {
+  flex: 0 0 55px;
+  font: 700 11px/1.2 var(--mono);
+  color: var(--cyan);
+  text-align: right;
+  padding-top: 10px;
+  border-right: 2px solid var(--line);
+  padding-right: 8px;
+}
+.plan-task {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13.5px;
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.2);
+}
+.plan-task.empty {
+  background: rgba(0,0,0,0.2);
+  border: 1px dashed rgba(255, 113, 206, 0.4);
+  color: var(--dim);
+  font-style: italic;
+}
+.plan-task .ttitle { font-weight: 600; color: #fff; text-shadow: 0 0 8px #ff71ce44; }
