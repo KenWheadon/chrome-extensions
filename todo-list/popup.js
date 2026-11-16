@@ -1,10 +1,14 @@
-/* VaporPet Tasks: task manager UI, storage, JSON import/export. */
+/* VaporPet Tasks: task manager UI, work planner, storage, JSON import/export. */
 (function () {
   'use strict';
   const VP = window.VaporPet;
   const STORE_KEY = 'vaporpet';
   const INSTANCE = Math.random().toString(36).slice(2);
   const LISTS = ['active', 'backlog', 'done'];
+  const PRIORITIES = ['high', 'medium', 'low'];
+  const PRIO_RANK = { high: 0, medium: 1, low: 2 };
+  const PRIO_LABEL = { high: 'HIGH', medium: 'MED', low: 'LOW' };
+  const HOUR_OPTIONS = [0, 0.25, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
   const hasChrome = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
   const isTab = new URLSearchParams(location.search).has('tab') || !hasChrome;
 
@@ -12,6 +16,53 @@
   const $$ = s => Array.from(document.querySelectorAll(s));
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  /* ---------- date helpers ---------- */
+  function localDateStr(date) {
+    const d = date || new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function parseLocalDate(str) {
+    if (!str || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return null;
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  function addDays(base, offset) {
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+  }
+  function getHorizonDays() {
+    const now = new Date();
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(now, i);
+      const iso = localDateStr(d);
+      const wd = d.toLocaleDateString([], { weekday: 'short' }).toUpperCase();
+      const md = d.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase();
+      const wdNice = d.toLocaleDateString([], { weekday: 'short' });
+      const mdNice = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      days.push({
+        iso,
+        offset: i,
+        pill: i === 0 ? 'TODAY' : i === 1 ? 'TOM' : wd,
+        heading: i === 0 ? `TODAY · ${wd} ${md}` : i === 1 ? `TOMORROW · ${wd} ${md}` : `${wd} · ${md}`,
+        opt: i === 0 ? `Today (${wdNice})` : i === 1 ? `Tomorrow (${wdNice})` : `${wdNice}, ${mdNice}`
+      });
+    }
+    return days;
+  }
+  function formatDayShort(iso) {
+    if (!iso) return '';
+    const today = localDateStr();
+    const tom = localDateStr(addDays(new Date(), 1));
+    if (iso === today) return 'Today';
+    if (iso === tom) return 'Tomorrow';
+    const d = parseLocalDate(iso);
+    return d ? d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : iso;
+  }
+  function formatHours(h) {
+    const n = Number(h) || 0;
+    return n % 1 === 0 ? `${n}h` : `${n.toFixed(2).replace(/0$/, '')}h`;
+  }
 
   /* ---------- storage ---------- */
   const store = {
@@ -27,14 +78,16 @@
 
   function defaultState() {
     const now = Date.now();
-    const t = (title, list, notes) => ({ id: uid(), title, list, notes: notes || '', createdAt: now, completedAt: null });
+    const t = (title, list, extra) => Object.assign({
+      id: uid(), title, list, notes: '', day: '', hours: 0, priority: 'medium', createdAt: now, completedAt: null
+    }, extra || {});
     return {
       schema: 1,
       tasks: [
-        t('Finish a task to feed your egg', 'active')
+        t('Finish a task to feed your egg', 'active', { day: localDateStr(), hours: 1, priority: 'high' })
       ],
       pet: VP.newPet(),
-      ui: { mode: 'list', tab: 'active', addPos: 'bottom', addList: 'active' }
+      ui: { mode: 'list', tab: 'active', addPos: 'bottom', addList: 'active', planDay: 'all' }
     };
   }
 
@@ -61,10 +114,16 @@
   function sanitizeState(s) {
     if (!s || typeof s !== 'object') return defaultState();
     s.tasks = Array.isArray(s.tasks) ? s.tasks.filter(t => t && t.title) : [];
-    s.tasks.forEach(t => { if (!LISTS.includes(t.list)) t.list = 'active'; if (!t.id) t.id = uid(); });
+    s.tasks.forEach(t => {
+      if (!LISTS.includes(t.list)) t.list = 'active';
+      if (!t.id) t.id = uid();
+      t.day = typeof t.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.day) ? t.day : '';
+      t.hours = Math.max(0, Math.min(24, parseFloat(t.hours) || 0));
+      t.priority = PRIORITIES.includes(t.priority) ? t.priority : 'medium';
+    });
     s.pet = VP.ensureDna(s.pet && typeof s.pet === 'object' ? s.pet : VP.newPet());
     s.pet.exp = Math.max(0, parseInt(s.pet.exp, 10) || 0);
-    s.ui = Object.assign({ mode: 'list', tab: 'active', addPos: 'bottom', addList: 'active' }, s.ui || {});
+    s.ui = Object.assign({ mode: 'list', tab: 'active', addPos: 'bottom', addList: 'active', planDay: 'all' }, s.ui || {});
     return s;
   }
 
@@ -121,16 +180,18 @@
   }
 
   const freshIds = new Set();
-  function addTask(title, list, pos) {
+  function addTask(title, list, pos, extra) {
     title = title.trim();
-    if (!title) return;
-    const t = { id: uid(), title, list, notes: '', createdAt: Date.now(), completedAt: null };
+    if (!title) return null;
+    const t = Object.assign({
+      id: uid(), title, list, notes: '', day: '', hours: 0, priority: 'medium', createdAt: Date.now(), completedAt: null
+    }, extra || {});
     state.tasks.push(t);
     freshIds.add(t.id);
     if (pos === 'top') moveToTop(t.id);
     save();
-    renderTasks();
-    if (state.ui.mode === 'focus') renderFocus();
+    renderAll();
+    return t;
   }
 
   function completeTask(id) {
@@ -222,12 +283,17 @@
     const done = t.list === 'done';
     const when = done && t.completedAt ? new Date(t.completedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
     const tip = done ? 'Undo: move back to Active' : 'Complete · +1 EXP';
+    const meta = [];
+    if (when) meta.push(`<span>Done ${esc(when)}</span>`);
+    if (!done && t.priority && t.priority !== 'medium') meta.push(`<span class="tbadge prio-${t.priority}">${PRIO_LABEL[t.priority]}</span>`);
+    if (!done && t.day) meta.push(`<span class="tbadge">${esc(formatDayShort(t.day))}</span>`);
+    if (!done && t.hours > 0) meta.push(`<span class="tbadge">${formatHours(t.hours)}</span>`);
     return `<li class="task${done ? ' done' : ''}${i === 0 && t.list === 'active' ? ' first' : ''}${freshIds.has(t.id) ? ' new' : ''}" data-id="${esc(t.id)}" ${done ? '' : 'draggable="true"'}>
       ${done ? '' : '<span class="grip" data-tip="Drag to reorder">⋮⋮</span>'}
       <button class="check" data-act="${done ? 'restore' : 'complete'}" data-tip="${tip}" aria-label="${tip}">${ICON.check}</button>
       <div class="tbody">
         <div class="ttitle">${esc(t.title)}</div>
-        ${when ? `<div class="tmeta">Done ${esc(when)}</div>` : ''}
+        ${meta.length ? `<div class="tmeta">${meta.join('')}</div>` : ''}
       </div>
       <div class="tact">
         ${done ? '' : btn('top', 'Move to top', ICON.top) + btn('bottom', 'Move to bottom', ICON.bottom) +
@@ -322,7 +388,6 @@
     freshIds.clear();
     const foot = $('#listFoot');
     foot.innerHTML = tab === 'done' && items.length ? '<button class="btn danger" id="clearDone">CLEAR DONE</button>' : '';
-    renderPlanner();
   }
 
   function startEdit(li) {
@@ -348,8 +413,7 @@
     const title = li.querySelector('.e-title').value.trim();
     if (title) t.title = title;
     save();
-    renderTasks();
-    if (state.ui.mode === 'focus') renderFocus();
+    renderAll();
   }
 
   $('#taskList').addEventListener('click', ev => {
@@ -360,8 +424,8 @@
     switch (btn.dataset.act) {
       case 'complete': celebrateComplete(id, btn, li); break;
       case 'restore': setList(id, 'active', 'bottom'); freshIds.add(id); save(); renderAll(); toast('Moved back to Active'); break;
-      case 'top': moveToTop(id); freshIds.add(id); save(); renderTasks(); break;
-      case 'bottom': moveToBottom(id); freshIds.add(id); save(); renderTasks(); break;
+      case 'top': moveToTop(id); freshIds.add(id); save(); renderAll(); break;
+      case 'bottom': moveToBottom(id); freshIds.add(id); save(); renderAll(); break;
       case 'swap': {
         const t = findTask(id);
         const to = t.list === 'active' ? 'backlog' : 'active';
@@ -407,7 +471,7 @@
     moveRelative(dragId, li.dataset.id, after);
     dragId = null;
     save();
-    renderTasks();
+    renderAll();
   });
   $('#taskList').addEventListener('dragend', () => {
     dragId = null;
@@ -453,30 +517,266 @@
   });
 
   /* ---------- planner view ---------- */
+  function sortForPlanner(list) {
+    const order = new Map(state.tasks.map((t, idx) => [t.id, idx]));
+    return list.slice().sort((a, b) => {
+      const pa = PRIO_RANK[a.priority] ?? 1;
+      const pb = PRIO_RANK[b.priority] ?? 1;
+      if (pa !== pb) return pa - pb;
+      return (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0);
+    });
+  }
+
+  function dayOptionsHTML(selectedDay, horizon) {
+    const known = new Set(horizon.map(d => d.iso));
+    let opts = `<option value=""${selectedDay === '' ? ' selected' : ''}>Unscheduled</option>`;
+    if (selectedDay && !known.has(selectedDay)) {
+      opts += `<option value="${esc(selectedDay)}" selected>${esc(formatDayShort(selectedDay))}</option>`;
+    }
+    for (const d of horizon) {
+      opts += `<option value="${d.iso}"${selectedDay === d.iso ? ' selected' : ''}>${esc(d.opt)}</option>`;
+    }
+    return opts;
+  }
+
+  function hoursOptionsHTML(selectedHours) {
+    const val = Number(selectedHours) || 0;
+    const list = HOUR_OPTIONS.includes(val) ? HOUR_OPTIONS : [...HOUR_OPTIONS, val].sort((a, b) => a - b);
+    return list.map(h => {
+      const label = h === 0 ? '0h · est' : formatHours(h);
+      return `<option value="${h}"${val === h ? ' selected' : ''}>${label}</option>`;
+    }).join('');
+  }
+
+  function prioOptionsHTML(selectedPrio) {
+    return PRIORITIES.map(p => `<option value="${p}"${selectedPrio === p ? ' selected' : ''}>${PRIO_LABEL[p]}</option>`).join('');
+  }
+
+  function plannerTaskHTML(t, horizon, isOverdue) {
+    const prio = t.priority || 'medium';
+    const isBacklog = t.list === 'backlog';
+    return `<div class="p-task prio-${prio}${isBacklog ? ' from-backlog' : ''}" data-id="${esc(t.id)}">
+      <div class="p-top">
+        <button class="check" data-pact="complete" data-tip="Complete · +1 EXP" aria-label="Complete">${ICON.check}</button>
+        <div class="p-title" data-tip="Double-click to rename">${esc(t.title)}</div>
+        <div class="p-acts">
+          ${isOverdue ? `<button class="p-icon-btn" data-pact="move-today" data-tip="Move to Today">⇥</button>` : ''}
+          <button class="p-icon-btn" data-pact="focus" data-tip="Start in Focus mode">▶</button>
+          ${t.day ? `<button class="p-icon-btn" data-pact="unschedule" data-tip="Clear day">✕</button>` : ''}
+        </div>
+      </div>
+      <div class="p-controls">
+        <select class="p-sel prio-${prio}" data-pfield="priority" data-tip="Priority" aria-label="Priority">${prioOptionsHTML(prio)}</select>
+        <select class="p-sel" data-pfield="day" data-tip="Assigned day" aria-label="Assigned day">${dayOptionsHTML(t.day, horizon)}</select>
+        <select class="p-sel" data-pfield="hours" data-tip="Estimated hours" aria-label="Hours">${hoursOptionsHTML(t.hours)}</select>
+      </div>
+    </div>`;
+  }
+
   function renderPlanner() {
-    const active = byList('active');
     const inner = $('#plannerInner');
     if (!inner) return;
+    const horizon = getHorizonDays();
+    const todayStr = horizon[0].iso;
+    const horizonSet = new Set(horizon.map(d => d.iso));
 
-    // Minimum 8-hour day layout starting at 9 AM, expanding if there are more tasks
-    const totalBlocks = Math.max(8, active.length + 1); 
-    let html = '';
+    // Include active tasks, plus any backlog tasks that have a day assigned
+    const workTasks = state.tasks.filter(t => t.list === 'active' || (t.list === 'backlog' && t.day));
+    const overdueTasks = sortForPlanner(workTasks.filter(t => t.day && t.day < todayStr));
+    const futureTasks = sortForPlanner(workTasks.filter(t => t.day && t.day > horizon[horizon.length - 1].iso));
+    const unplannedTasks = sortForPlanner(state.tasks.filter(t => t.list === 'active' && !t.day));
 
-    for (let i = 0; i < totalBlocks; i++) {
-      const hour = (9 + i) % 24;
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const displayHour = hour % 12 === 0 ? 12 : hour % 12;
-      const t = active[i];
-      
-      html += `<div class="plan-block" style="animation-delay: ${i * 0.04}s">
-        <div class="plan-time">${displayHour} ${ampm}</div>
-        <div class="plan-task ${t ? '' : 'empty'}">
-          ${t ? `<div class="ttitle">${esc(t.title)}</div>` : 'Open slot'}
+    const validFilters = new Set(['all', 'unplanned', ...(overdueTasks.length ? ['overdue'] : []), ...horizon.map(d => d.iso)]);
+    const filter = validFilters.has(state.ui.planDay) ? state.ui.planDay : 'all';
+    const defaultAddDay = horizonSet.has(filter) ? filter : (filter === 'unplanned' ? '' : todayStr);
+
+    // Filter pills
+    const pills = [
+      `<button type="button" class="plan-pill${filter === 'all' ? ' on' : ''}" data-pact="filter" data-day="all">ALL <b>${workTasks.length}</b></button>`,
+      overdueTasks.length ? `<button type="button" class="plan-pill overdue${filter === 'overdue' ? ' on' : ''}" data-pact="filter" data-day="overdue">OVERDUE <b>${overdueTasks.length}</b></button>` : '',
+      ...horizon.map(d => {
+        const cnt = workTasks.filter(t => t.day === d.iso).length;
+        return `<button type="button" class="plan-pill${filter === d.iso ? ' on' : ''}" data-pact="filter" data-day="${d.iso}">${d.pill}${cnt ? ` <b>${cnt}</b>` : ''}</button>`;
+      }),
+      `<button type="button" class="plan-pill${filter === 'unplanned' ? ' on' : ''}" data-pact="filter" data-day="unplanned">UNPLANNED <b>${unplannedTasks.length}</b></button>`
+    ].join('');
+
+    // Build day sections
+    const sections = [];
+
+    if (overdueTasks.length && (filter === 'all' || filter === 'overdue')) {
+      const hrs = overdueTasks.reduce((s, t) => s + (t.hours || 0), 0);
+      sections.push(`<section class="plan-day is-overdue">
+        <div class="plan-day-head">
+          <span class="plan-day-title">OVERDUE / CARRYOVER</span>
+          <span class="plan-cap over">${formatHours(hrs)} · ${overdueTasks.length}</span>
         </div>
-      </div>`;
+        <div class="plan-day-tasks">${overdueTasks.map(t => plannerTaskHTML(t, horizon, true)).join('')}</div>
+      </section>`);
     }
-    inner.innerHTML = html;
+
+    for (const d of horizon) {
+      if (filter !== 'all' && filter !== d.iso) continue;
+      const dayTasks = sortForPlanner(workTasks.filter(t => t.day === d.iso));
+      // In 'all' mode, always show Today and Tomorrow; show later days if they have tasks
+      if (filter === 'all' && d.offset > 1 && !dayTasks.length) continue;
+      const hrs = dayTasks.reduce((s, t) => s + (t.hours || 0), 0);
+      const pct = Math.min(100, (hrs / 8) * 100);
+      const over = hrs > 8;
+      sections.push(`<section class="plan-day${d.offset === 0 ? ' is-today' : ''}">
+        <div class="plan-day-head">
+          <span class="plan-day-title">${d.heading}</span>
+          <span class="plan-cap${over ? ' over' : ''}" data-tip="${over ? 'Over 8h daily target!' : 'Scheduled hours / 8h day'}">
+            <span>${formatHours(hrs)} / 8h</span>
+            <span class="plan-cap-bar"><i style="width:${pct}%"></i></span>
+          </span>
+        </div>
+        <div class="plan-day-tasks">
+          ${dayTasks.length ? dayTasks.map(t => plannerTaskHTML(t, horizon, false)).join('') : '<div class="plan-slot-empty">No blocks assigned — add above or assign a task below.</div>'}
+        </div>
+      </section>`);
+    }
+
+    if (futureTasks.length && filter === 'all') {
+      const hrs = futureTasks.reduce((s, t) => s + (t.hours || 0), 0);
+      sections.push(`<section class="plan-day">
+        <div class="plan-day-head">
+          <span class="plan-day-title">LATER DATES</span>
+          <span class="plan-cap">${formatHours(hrs)} · ${futureTasks.length}</span>
+        </div>
+        <div class="plan-day-tasks">${futureTasks.map(t => plannerTaskHTML(t, horizon, false)).join('')}</div>
+      </section>`);
+    }
+
+    if (filter === 'all' || filter === 'unplanned') {
+      const hrs = unplannedTasks.reduce((s, t) => s + (t.hours || 0), 0);
+      sections.push(`<section class="plan-day is-unplanned">
+        <div class="plan-day-head">
+          <span class="plan-day-title">UNSCHEDULED ACTIVE</span>
+          <span class="plan-cap">${hrs > 0 ? formatHours(hrs) + ' · ' : ''}${unplannedTasks.length}</span>
+        </div>
+        <div class="plan-day-tasks">
+          ${unplannedTasks.length ? unplannedTasks.map(t => plannerTaskHTML(t, horizon, false)).join('') : '<div class="plan-slot-empty">All active tasks are scheduled!</div>'}
+        </div>
+      </section>`);
+    }
+
+    const prevTitle = $('#planAddInput') ? $('#planAddInput').value : '';
+    const prevHours = $('#planAddHours') ? Number($('#planAddHours').value) : 1;
+    const prevPrio = $('#planAddPrio') ? $('#planAddPrio').value : 'medium';
+
+    inner.innerHTML = `
+      <form class="plan-add" id="planAddForm" autocomplete="off">
+        <div class="plan-add-top">
+          <input id="planAddInput" placeholder="Block out a task…" maxlength="300" value="${esc(prevTitle)}">
+          <button type="submit" class="plus" data-tip="Add to planner" aria-label="Add to planner">+</button>
+        </div>
+        <div class="plan-add-meta">
+          <select class="p-sel" id="planAddDay" aria-label="Day">${dayOptionsHTML(defaultAddDay, horizon)}</select>
+          <select class="p-sel" id="planAddHours" aria-label="Hours">${hoursOptionsHTML(prevHours)}</select>
+          <select class="p-sel prio-${prevPrio}" id="planAddPrio" aria-label="Priority">${prioOptionsHTML(prevPrio)}</select>
+        </div>
+      </form>
+      <div class="plan-strip">${pills}</div>
+      ${sections.join('')}`;
   }
+
+  $('#plannerInner').addEventListener('submit', ev => {
+    if (ev.target.id !== 'planAddForm') return;
+    ev.preventDefault();
+    const inp = $('#planAddInput');
+    const title = inp.value.trim();
+    if (!title) return;
+    const day = $('#planAddDay').value;
+    const hours = parseFloat($('#planAddHours').value) || 0;
+    const priority = $('#planAddPrio').value || 'medium';
+    const [x, y] = centerOf(ev.target.querySelector('.plus'));
+    burst(x, y, 8);
+    inp.value = '';
+    addTask(title, 'active', 'bottom', { day, hours, priority });
+    const nextInp = $('#planAddInput');
+    if (nextInp) nextInp.focus();
+  });
+
+  $('#plannerInner').addEventListener('change', ev => {
+    const sel = ev.target.closest('select');
+    if (!sel) return;
+    if (sel.id === 'planAddPrio') {
+      sel.className = `p-sel prio-${sel.value}`;
+      return;
+    }
+    const card = sel.closest('.p-task');
+    const field = sel.dataset.pfield;
+    if (!card || !field) return;
+    const t = findTask(card.dataset.id);
+    if (!t) return;
+    if (field === 'priority') t.priority = PRIORITIES.includes(sel.value) ? sel.value : 'medium';
+    if (field === 'day') {
+      t.day = sel.value;
+      if (t.day && t.list === 'backlog') t.list = 'active';
+    }
+    if (field === 'hours') t.hours = Math.max(0, Math.min(24, parseFloat(sel.value) || 0));
+    save();
+    renderAll();
+  });
+
+  $('#plannerInner').addEventListener('click', ev => {
+    const btn = ev.target.closest('[data-pact]');
+    if (!btn) return;
+    const act = btn.dataset.pact;
+    if (act === 'filter') {
+      state.ui.planDay = btn.dataset.day;
+      save();
+      renderPlanner();
+      return;
+    }
+    const card = btn.closest('.p-task');
+    if (!card) return;
+    const id = card.dataset.id;
+    const t = findTask(id);
+    if (!t) return;
+    if (act === 'complete') {
+      celebrateComplete(id, btn, card);
+    } else if (act === 'unschedule') {
+      t.day = '';
+      save();
+      renderAll();
+      toast('Removed from schedule');
+    } else if (act === 'move-today') {
+      t.day = localDateStr();
+      if (t.list === 'backlog') t.list = 'active';
+      save();
+      renderAll();
+      toast('Moved to Today');
+    } else if (act === 'focus') {
+      if (t.list !== 'active') setList(id, 'active', 'top');
+      else moveToTop(id);
+      save();
+      setMode('focus');
+    }
+  });
+
+  $('#plannerInner').addEventListener('dblclick', ev => {
+    const titleEl = ev.target.closest('.p-title');
+    const card = ev.target.closest('.p-task');
+    if (!titleEl || !card || titleEl.querySelector('input')) return;
+    const t = findTask(card.dataset.id);
+    if (!t) return;
+    titleEl.innerHTML = `<div class="edit"><input class="e-title" maxlength="300" value="${esc(t.title)}"></div>`;
+    const inp = titleEl.querySelector('.e-title');
+    inp.focus();
+    inp.select();
+    const finish = ok => {
+      if (ok && inp.value.trim()) t.title = inp.value.trim();
+      save();
+      renderAll();
+    };
+    inp.addEventListener('blur', () => finish(true));
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    });
+  });
 
   /* ---------- focus view ---------- */
   function renderFocus() {
@@ -577,7 +877,7 @@
   $('#levelFx').addEventListener('click', () => { $('#levelFx').hidden = true; });
 
   /* ----- import / export ----- */
-  const LLM_HOWTO = 'Edit "tasks". Each task: "title" (required), "list" = "active" | "backlog" | "done", optional "notes". Array order = order inside each list (top first; the first active task is the current focus task). Keep "id" on existing tasks; omit "id" for new tasks. Remove a task from the array to delete it. Marking a task "done" here does not give the pet EXP.';
+  const LLM_HOWTO = 'Edit "tasks". Each task: "title" (required), "list" = "active" | "backlog" | "done", optional "day" ("YYYY-MM-DD"), "hours" (number), "priority" = "high" | "medium" | "low", "notes". Array order = order inside each list (top first). Keep "id" on existing tasks; omit "id" for new tasks. Remove a task from the array to delete it. Marking a task "done" here does not give the pet EXP.';
 
   function exportObj(includePet) {
     const ordered = [...byList('active'), ...byList('backlog'), ...byList('done')];
@@ -588,6 +888,9 @@
       howTo: LLM_HOWTO,
       tasks: ordered.map(t => {
         const x = { id: t.id, title: t.title, list: t.list };
+        if (t.day) x.day = t.day;
+        if (t.hours > 0) x.hours = t.hours;
+        if (t.priority && t.priority !== 'medium') x.priority = t.priority;
         if (t.notes) x.notes = t.notes;
         if (t.list === 'done' && t.completedAt) x.completedAt = new Date(t.completedAt).toISOString();
         return x;
@@ -598,7 +901,7 @@
   }
   const exportText = includePet => JSON.stringify(exportObj(includePet), null, 2);
   function llmText() {
-    return 'Below is my task list as JSON from my task app. I will tell you what changed (new tasks, finished tasks, new priorities). ' +
+    return 'Below is my task list as JSON from my task app. I will tell you what changed (new tasks, finished tasks, new priorities, scheduled days/hours). ' +
       'Reply with the complete updated JSON only, in exactly the same format, inside one ```json code block.\n\n' + JSON.stringify(exportObj(false), null, 2);
   }
 
@@ -649,8 +952,12 @@
       let id = t.id ? String(t.id) : uid();
       if (seen.has(id)) id = uid();
       seen.add(id);
+      const day = typeof t.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.day) ? t.day : '';
+      const hours = Math.max(0, Math.min(24, parseFloat(t.hours) || 0));
+      const pRaw = String(t.priority || '').toLowerCase();
+      const priority = PRIORITIES.includes(pRaw) ? pRaw : 'medium';
       const completedAt = list === 'done' ? (Date.parse(t.completedAt) || now) : null;
-      return { id, title: title.slice(0, 300), list, notes: t.notes ? String(t.notes) : '', createdAt: Date.parse(t.createdAt) || now, completedAt };
+      return { id, title: title.slice(0, 300), list, day, hours, priority, notes: t.notes ? String(t.notes) : '', createdAt: Date.parse(t.createdAt) || now, completedAt };
     }).filter(Boolean);
     return { tasks, pet: data && !Array.isArray(data) && data.pet && typeof data.pet === 'object' ? data.pet : null };
   }
@@ -667,8 +974,11 @@
     } else {
       for (const t of parsed.tasks) {
         const o = old.get(t.id);
-        if (o) { o.title = t.title; o.notes = t.notes; if (o.list !== t.list) { o.list = t.list; o.completedAt = t.completedAt; } updated++; }
-        else { state.tasks.push(t); added++; }
+        if (o) {
+          o.title = t.title; o.notes = t.notes; o.day = t.day; o.hours = t.hours; o.priority = t.priority;
+          if (o.list !== t.list) { o.list = t.list; o.completedAt = t.completedAt; }
+          updated++;
+        } else { state.tasks.push(t); added++; }
       }
     }
     let petMsg = '';
@@ -690,7 +1000,7 @@
       </div>
       <h3>IMPORT</h3>
       <p class="hint">Paste JSON. It replaces your task list.</p>
-      <textarea id="impText" placeholder='{"tasks":[{"title":"Email Sam","list":"active"},{"title":"Plan trip","list":"backlog"}]}'></textarea>
+      <textarea id="impText" placeholder='{"tasks":[{"title":"Email Sam","list":"active","day":"2026-11-16","hours":1,"priority":"high"}]}'></textarea>
       <div class="btns"><button class="btn primary" data-d="replace">IMPORT</button></div>
       <div class="status" id="dStatus"></div>
     `, async ev => {
@@ -717,6 +1027,14 @@
     });
   }
   $('#btnData').addEventListener('click', openDataSheet);
+
+  $('#btnFull').addEventListener('click', () => {
+    if (hasChrome && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?tab=1') });
+    } else {
+      window.open(location.pathname + '?tab=1', '_blank');
+    }
+  });
 
   /* ---------- boot ---------- */
   async function boot() {
